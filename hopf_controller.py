@@ -1,463 +1,433 @@
 # ================================================================
-# Hopf Geometric Controller — Computational Substrate on S³
+# Hopf Geometric Controller v2 — Spectral Substrate on S³
 #
-# Replaces the feed-forward MLP with operations derived from
-# the Hopf fibration S³ → S² (fiber S¹).
+# Architecture derived from the geometry of the 600-cell and the
+# Hopf fibration. NOT a quaternion MLP.
 #
-# Legal operations:
-#   1. Right multiplication (fiber-preserving rotation)
-#   2. Left multiplication (base-changing rotation)
-#   3. Hopf projection S³ → S² (the nonlinearity)
-#   4. Section lifting S² → S³ (with learned phase)
-#   5. Parallel transport (Berry phase accumulation)
-#   6. Holonomy (topological phase from closed loops)
+# Pipeline:
+#   1. Project input onto 120 vertices of 600-cell via Hopf map
+#   2. Spectral decomposition into eigenbasis (Theorem 3 + 5)
+#   3. Irrep-respecting rotations within each eigenspace
+#   4. Poincaré conformal warp per eigenspace (the nonlinearity)
+#   5. Linear readout to action logits
 #
-# All parameters live on S³. Mutation is geodesic.
-# No gradients. No backprop. Evolution finds what works.
+# Fixed (geometric, not learned):
+#   - 600-cell vertices, eigenbasis, curl basis, projection kernel
+#
+# Evolved (the only parameters evolution touches):
+#   - Per-eigenspace rotations (quaternions, Givens angles)
+#   - Per-eigenspace scales
+#   - Readout weights
 # ================================================================
 
-import random
 import math
+import random
+import numpy as np
+import quaternion as npquat
+
+from cell600 import get_geometry
 
 
 # ================================================================
-# Quaternion Arithmetic (pure Python, no dependencies)
+# Geometry cache (computed once on first import)
 # ================================================================
 
-def quat_multiply(a, b):
-    """Hamilton product of two quaternions [w, x, y, z]."""
-    w1, x1, y1, z1 = a
-    w2, x2, y2, z2 = b
-    return [
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,
-        w1*z2 + x1*y2 - y1*x2 + z1*w2,
-    ]
+_GEO = None
+_PIXEL_KERNEL = None  # (784, 120) soft assignment for MNIST
 
 
-def quat_conjugate(q):
-    """Conjugate: [w, -x, -y, -z]."""
-    return [q[0], -q[1], -q[2], -q[3]]
+def _get_geo():
+    global _GEO
+    if _GEO is None:
+        _GEO = get_geometry()
+    return _GEO
 
 
-def quat_norm(q):
-    """Euclidean norm of quaternion."""
-    return math.sqrt(q[0]**2 + q[1]**2 + q[2]**2 + q[3]**2)
+# ================================================================
+# Pixel-to-S³ mapping and soft-assignment kernel (MNIST)
+# ================================================================
 
-
-def quat_normalize(q):
-    """Project back to S³ (unit quaternion)."""
-    n = quat_norm(q)
-    if n < 1e-12:
-        return [1.0, 0.0, 0.0, 0.0]  # identity
-    return [c / n for c in q]
-
-
-def quat_exp(v):
+def _build_pixel_kernel(input_size, kappa=10.0):
     """
-    Exponential map: tangent vector (pure quaternion [0, vx, vy, vz]) → S³.
-    exp([0, v]) = [cos(|v|), sin(|v|)/|v| * v]
+    Build the soft-assignment kernel mapping input positions to 600-cell vertices.
+
+    For MNIST (784 pixels on a 28×28 grid):
+      1. Map pixel (i,j) to normalized coords (x,y) ∈ [-1, 1]²
+      2. Inverse stereographic projection: (x,y) → S²
+      3. Hopf section lift: S² → S³
+      4. Soft assignment to 120 vertices via K[pixel, vertex] = softmax(κ · q_pixel · q_vertex)
+
+    Returns:
+        np.ndarray of shape (input_size, 120)
     """
-    vx, vy, vz = v
-    theta = math.sqrt(vx**2 + vy**2 + vz**2)
-    if theta < 1e-12:
-        return [1.0, 0.0, 0.0, 0.0]
-    s = math.sin(theta) / theta
-    return [math.cos(theta), s * vx, s * vy, s * vz]
+    geo = _get_geo()
+    vertices = geo["vertices"]  # (120, 4)
 
-
-def quat_log(q):
-    """
-    Logarithmic map: S³ → tangent space at identity.
-    Returns pure quaternion [vx, vy, vz].
-    """
-    q = quat_normalize(q)
-    # Ensure w is in [-1, 1] for acos
-    w = max(-1.0, min(1.0, q[0]))
-    theta = math.acos(abs(w))
-    if theta < 1e-12:
-        return [0.0, 0.0, 0.0]
-    s = theta / math.sin(theta)
-    sign = 1.0 if w >= 0 else -1.0
-    return [sign * s * q[1], sign * s * q[2], sign * s * q[3]]
-
-
-def hopf_project(q):
-    """
-    Hopf projection S³ → S² (the nonlinearity).
-    Maps unit quaternion to point on unit 2-sphere.
-
-    π(q₀,q₁,q₂,q₃) = (q₀²+q₁²-q₂²-q₃², 2(q₁q₂+q₀q₃), 2(q₁q₃-q₀q₂))
-
-    This IS the nonlinearity. No ReLU needed.
-    """
-    w, x, y, z = q
-    return [
-        w*w + x*x - y*y - z*z,
-        2.0 * (x*y + w*z),
-        2.0 * (x*z - w*y),
-    ]
-
-
-def hopf_lift(s2_point, phase):
-    """
-    Section lifting: S² × S¹ → S³.
-    Given a point on S² and a phase angle, lift back to S³.
-
-    Uses the standard section of the Hopf bundle.
-    """
-    sx, sy, sz = s2_point
-    # Normalize the S² point
-    norm = math.sqrt(sx*sx + sy*sy + sz*sz)
-    if norm < 1e-12:
-        return [math.cos(phase), math.sin(phase), 0.0, 0.0]
-    sx, sy, sz = sx/norm, sy/norm, sz/norm
-
-    # Standard section: given (sx, sy, sz) on S², construct unit quaternion
-    # that projects to it, then rotate by phase along the fiber
-    #
-    # For north-pole-based section:
-    # If sz > -1 + eps (not at south pole):
-    #   base_q = [sqrt((1+sz)/2), -sy/sqrt(2(1+sz)), sx/sqrt(2(1+sz)), 0]
-    # Then apply fiber rotation: q = base_q * [cos(phase/2), 0, 0, sin(phase/2)]
-
-    if sz > -0.999:
-        denom = math.sqrt(2.0 * (1.0 + sz))
-        base = [denom / 2.0, -sy / denom, sx / denom, 0.0]
+    if input_size == 784:
+        # MNIST: 28×28 grid
+        rows, cols = 28, 28
     else:
-        # Near south pole, use alternate section
-        denom = math.sqrt(2.0 * (1.0 - sz))
-        base = [0.0, sx / denom, -sy / denom, denom / 2.0]
+        # Generic: assume square, or fall back to 1D distribution on S³
+        side = int(math.ceil(math.sqrt(input_size)))
+        rows, cols = side, side
 
-    # Fiber rotation by phase (right multiplication by e^{i*phase/2} in fiber direction)
-    fiber_rot = [math.cos(phase / 2.0), 0.0, 0.0, math.sin(phase / 2.0)]
-    result = quat_multiply(base, fiber_rot)
-    return quat_normalize(result)
+    pixel_quats = []
+    for idx in range(input_size):
+        if input_size == 784:
+            r, c = divmod(idx, 28)
+        else:
+            r, c = divmod(idx, cols)
 
+        # Normalize to [-1, 1]²
+        x = 2.0 * c / (cols - 1) - 1.0 if cols > 1 else 0.0
+        y = 2.0 * r / (rows - 1) - 1.0 if rows > 1 else 0.0
 
-def luneburg_warp(vec):
-    """
-    Lüneburg/Poincaré conformal radial warp.
+        # Inverse stereographic projection: (x, y) → S²
+        denom = 1.0 + x * x + y * y
+        X = 2.0 * x / denom
+        Y = 2.0 * y / denom
+        Z = (x * x + y * y - 1.0) / denom
 
-    Replaces per-component tanh with a geometry-preserving radial compression:
-        r' = 2 * tanh(r / 2)
+        # Hopf section lift: S² → S³ (canonical section, phase θ=0)
+        if Z > -0.999:
+            s = math.sqrt(2.0 * (1.0 + Z))
+            q = np.array([s / 2.0, -Y / s, X / s, 0.0])
+        else:
+            q = np.array([0.0, 0.0, 1.0, 0.0])
 
-    The whole vector gets scaled together instead of squashed independently.
-    Angles between components are preserved. The ball structure is maintained.
-    Invertible via 2 * atanh(r' / 2).
+        q = q / np.linalg.norm(q)
+        pixel_quats.append(q)
 
-    This IS the Poincaré disk metric expressed as physical optics (GRIN lens).
-    Compression factor: sech²(r/2).
-    """
-    r = math.sqrt(sum(x * x for x in vec))
-    if r < 1e-12:
-        return vec[:]
-    r_prime = 2.0 * math.tanh(r / 2.0)
-    scale = r_prime / r
-    return [x * scale for x in vec]
+    pixel_quats = np.array(pixel_quats)  # (input_size, 4)
 
+    # Soft assignment: K[pixel, vertex] = softmax(κ · q_pixel · q_vertex)
+    # Raw dot products (not absolute — these are oriented on S³)
+    dots = pixel_quats @ vertices.T  # (input_size, 120)
+    # Use absolute value for assignment (Hopf fibers are circles, both orientations valid)
+    dots = np.abs(dots)
+    # Softmax along vertex axis with temperature κ
+    scaled = kappa * dots
+    scaled -= scaled.max(axis=1, keepdims=True)  # numerical stability
+    exp_scaled = np.exp(scaled)
+    kernel = exp_scaled / exp_scaled.sum(axis=1, keepdims=True)
 
-def luneburg_unwarp(vec):
-    """Inverse: 2 * atanh(r' / 2). Maps from Poincaré ball back to Euclidean."""
-    r_prime = math.sqrt(sum(x * x for x in vec))
-    if r_prime < 1e-12:
-        return vec[:]
-    if r_prime >= 2.0 - 1e-12:
-        r_prime = 2.0 - 1e-12  # clamp to boundary
-    r = 2.0 * math.atanh(r_prime / 2.0)
-    scale = r / r_prime
-    return [x * scale for x in vec]
-
-
-def compression_factor(r):
-    """
-    Compression factor sech²(r/2).
-    Measures information density change with radius.
-    """
-    return 1.0 / (math.cosh(r / 2.0) ** 2)
+    return kernel.astype(np.float64)
 
 
-def random_unit_quaternion():
-    """Sample uniformly from S³ using Marsaglia's method."""
-    while True:
-        u1 = random.gauss(0, 1)
-        u2 = random.gauss(0, 1)
-        u3 = random.gauss(0, 1)
-        u4 = random.gauss(0, 1)
-        n = math.sqrt(u1*u1 + u2*u2 + u3*u3 + u4*u4)
-        if n > 1e-12:
-            return [u1/n, u2/n, u3/n, u4/n]
-
-
-def geodesic_perturb(q, scale):
-    """
-    Geodesic perturbation on S³.
-    Generate small tangent vector, exponentiate, right-multiply.
-    Stays on S³ at all times.
-    """
-    v = [random.gauss(0, scale) for _ in range(3)]
-    delta = quat_exp(v)
-    result = quat_multiply(q, delta)
-    return quat_normalize(result)
+def _get_pixel_kernel(input_size):
+    """Get or compute cached pixel kernel."""
+    global _PIXEL_KERNEL
+    if _PIXEL_KERNEL is None or _PIXEL_KERNEL.shape[0] != input_size:
+        _PIXEL_KERNEL = _build_pixel_kernel(input_size)
+    return _PIXEL_KERNEL
 
 
 # ================================================================
-# HopfController — The Geometric Computational Substrate
+# Poincaré conformal warp (the nonlinearity)
+# ================================================================
+
+def poincare_warp(coefficients):
+    """
+    Radial conformal compression: r' = 2·tanh(r/2).
+    Applied to a coefficient vector AS A WHOLE, not per-component.
+    Preserves angles between components. Bounded output (radius < 2).
+    Invertible via 2·atanh(r'/2).
+
+    This IS the nonlinearity. There is no other.
+    """
+    r = np.linalg.norm(coefficients)
+    if r < 1e-10:
+        return coefficients.copy()
+    r_prime = 2.0 * math.tanh(r / 2.0)
+    return coefficients * (r_prime / r)
+
+
+# ================================================================
+# Within-eigenspace rotation operations
+# ================================================================
+
+def apply_so4_rotation(coefficients, qL, qR):
+    """
+    Rotate a 4D coefficient vector via SO(4) parameterized as
+    a pair of unit quaternions: v → qL * v * conj(qR).
+
+    This is the proper isometry of S³ acting on the 4D dipole eigenspace.
+    Uses numpy-quaternion for the operation.
+    """
+    # Convert coefficient vector to quaternion
+    v = np.quaternion(coefficients[0], coefficients[1],
+                      coefficients[2], coefficients[3])
+    # Apply double-cover rotation
+    result = qL * v * qR.conjugate()
+    return np.array([result.w, result.x, result.y, result.z])
+
+
+def apply_givens_rotations(coefficients, angles, pairs):
+    """
+    Apply a sequence of Givens (planar) rotations to a coefficient vector.
+    Each rotation acts in a 2D plane specified by (i, j) index pair.
+
+    For the 9D quadrupole eigenspace, this parameterizes a subgroup of SO(9).
+    """
+    result = coefficients.copy()
+    for angle, (i, j) in zip(angles, pairs):
+        c = math.cos(angle)
+        s = math.sin(angle)
+        ri = c * result[i] - s * result[j]
+        rj = s * result[i] + c * result[j]
+        result[i] = ri
+        result[j] = rj
+    return result
+
+
+# ================================================================
+# Mutation operations
+# ================================================================
+
+def mutate_quaternion(q, rate, scale):
+    """Geodesic perturbation on S³ via exponential map."""
+    if random.random() > rate:
+        return q
+    # Random tangent vector
+    v = np.array([random.gauss(0, scale) for _ in range(3)])
+    norm_v = np.linalg.norm(v)
+    if norm_v < 1e-12:
+        return q
+    half_angle = norm_v
+    s = math.sin(half_angle) / norm_v
+    delta = np.quaternion(math.cos(half_angle), s * v[0], s * v[1], s * v[2])
+    result = q * delta
+    # Normalize
+    result = result / abs(result)
+    return result
+
+
+def mutate_angle(angle, rate, scale):
+    """Additive Gaussian mutation on an angle (wraps naturally)."""
+    if random.random() > rate:
+        return angle
+    return angle + random.gauss(0, scale)
+
+
+def mutate_scale(s, rate, scale):
+    """Scale-relative mutation matching GENREG protein style."""
+    if random.random() > rate:
+        return s
+    return s + random.gauss(0, scale * (abs(s) + 1e-9))
+
+
+def mutate_flat(arr, rate, scale):
+    """Standard GENREG mutation on flat weight array."""
+    for i in range(len(arr)):
+        if random.random() < rate:
+            arr[i] += random.gauss(0, scale)
+
+
+def mutate_flat_2d(arr, rate, scale):
+    """Standard GENREG mutation on 2D weight array."""
+    rows, cols = arr.shape
+    for i in range(rows):
+        for j in range(cols):
+            if random.random() < rate:
+                arr[i, j] += random.gauss(0, scale)
+
+
+# ================================================================
+# HopfController — The Spectral Geometric Substrate
 # ================================================================
 
 class HopfController:
     """
-    Controller that computes entirely on S³ via Hopf fibration geometry.
+    Controller that computes via the spectral geometry of the 600-cell.
 
-    Architecture:
-        1. Embed input → S³ (chunk into quaternions, normalize)
-        2. Left-multiply by learned quaternions (change fibers — inter-fiber mixing)
-        3. Right-multiply by learned quaternions (rotate within fibers — phase)
-        4. Hopf project S³ → S² (nonlinearity)
-        5. Lift back to S³ with learned phases (for deeper layers)
-        6. Final Hopf project → readout
+    Fixed (determined by geometry, never mutated):
+        - 600-cell vertices (120 unit quaternions of 2I)
+        - Scalar eigenbasis E0-E5 (Theorem 3)
+        - Curl eigenbasis C1-C4 (Theorem 5)
+        - Pixel-to-vertex soft-assignment kernel
 
-    Drop-in replacement for Controller. Same interface.
+    Evolved (the parameters GENREG mutates):
+        - s0: scale on DC component (E0, 1D) → 1 param
+        - qL1, qR1: SO(4) rotation on dipole space (E1, 4D) → 2 quaternions
+        - givens2: Givens angles on quadrupole space (E2, 9D) → 4 angles
+        - curl_scale: scale on curl features (C1, 6D) → 1 param
+        - W_out, b_out: linear readout → output_size × n_features + output_size
+
+    Total evolved params (minimal, MNIST): ~225
     """
 
-    def __init__(self, input_size=11, hidden_size=16, output_size=4):
+    # Eigenspaces used (minimal version: E0, E1, E2, C1)
+    # Feature dims: 1 + 4 + 9 + 6 = 20
+    N_FEATURES = 20
+
+    # Givens rotation pairs for 9D quadrupole space
+    GIVENS_PAIRS = [(0, 1), (2, 3), (4, 5), (6, 7)]
+
+    def __init__(self, input_size=784, hidden_size=16, output_size=10):
+        # Store sizes for interface compatibility
         self.input_size = input_size
+        self.hidden_size = hidden_size  # unused internally, kept for interface
         self.output_size = output_size
 
-        # Number of quaternion units in hidden layer
-        # Each quaternion is 4 reals, but we think in quaternion units
-        self.hidden_size = hidden_size  # store for compatibility
-        self.n_quat_hidden = max(1, hidden_size // 4)
+        # Ensure geometry is loaded
+        _get_geo()
 
-        # Number of input quaternions: chunk input into groups of 4
-        # Pad input to multiple of 4
-        self.n_quat_input = max(1, (input_size + 3) // 4)
+        # Pre-compute pixel kernel for this input size
+        _get_pixel_kernel(input_size)
 
-        # --- Learnable parameters (all on S³) ---
+        # --- Evolved parameters ---
 
-        # Layer 1: Input embedding to hidden
-        # For each hidden quaternion, one left-multiplier per input quaternion
-        # This mixes across fibers (cross-feature interaction)
-        self.left_quats = [
-            [random_unit_quaternion() for _ in range(self.n_quat_input)]
-            for _ in range(self.n_quat_hidden)
-        ]
+        # E0 (1D): scalar scale
+        self.s0 = 1.0
 
-        # Right multipliers for phase rotation (within-fiber)
-        # One per hidden unit
-        self.right_quats = [random_unit_quaternion() for _ in range(self.n_quat_hidden)]
+        # E1 (4D): SO(4) rotation via pair of unit quaternions
+        self.qL1 = np.quaternion(1, 0, 0, 0)
+        self.qR1 = np.quaternion(1, 0, 0, 0)
 
-        # Layer 2: Hidden to output via Hopf projection
-        # After projecting hidden to S² (3 coords each), we need to
-        # map n_quat_hidden * 3 values → output_size
-        #
-        # This is done geometrically: lift the S² points back to S³,
-        # apply another round of left/right multiplications, project again.
+        # E2 (9D): Givens rotations (4 angles for 4 rotation planes)
+        self.givens2 = [0.0] * len(self.GIVENS_PAIRS)
 
-        # Learned phases for section lifting (one per hidden unit)
-        self.lift_phases = [random.uniform(-math.pi, math.pi) for _ in range(self.n_quat_hidden)]
+        # C1 (6D): scalar scale
+        self.curl_scale = 1.0
 
-        # Output layer: quaternion multipliers that combine hidden representations
-        # For each output, we have one quaternion that left-multiplies each hidden unit
-        # Then project to S² and take one coordinate as the logit
-        n_quat_out = max(1, (output_size + 2) // 3)  # each S² point gives 3 coords
-        self.out_left_quats = [
-            [random_unit_quaternion() for _ in range(self.n_quat_hidden)]
-            for _ in range(n_quat_out)
-        ]
-        self.out_right_quats = [random_unit_quaternion() for _ in range(n_quat_out)]
-        self.n_quat_out = n_quat_out
-
-    def _embed_to_quaternions(self, inputs):
-        """
-        Embed flat input vector into unit quaternions on S³.
-        Chunk into groups of 4, normalize to unit quaternions.
-        """
-        # Pad to multiple of 4
-        x = list(inputs)
-        while len(x) < self.input_size:
-            x.append(0.0)
-        x = x[:self.input_size]
-        while len(x) % 4 != 0:
-            x.append(0.0)
-
-        quats = []
-        for i in range(0, len(x), 4):
-            q = x[i:i+4]
-            n = math.sqrt(sum(c*c for c in q))
-            if n < 1e-12:
-                quats.append([1.0, 0.0, 0.0, 0.0])
-            else:
-                quats.append([c / n for c in q])
-        return quats
+        # Readout: linear map from features to logits
+        # Xavier initialization
+        fan_in = self.N_FEATURES
+        fan_out = output_size
+        xavier_scale = math.sqrt(2.0 / (fan_in + fan_out))
+        self.W_out = np.random.randn(output_size, self.N_FEATURES) * xavier_scale
+        self.b_out = np.zeros(output_size)
 
     def forward(self, inputs):
         """
-        Forward pass through Hopf geometry.
+        Forward pass through the spectral geometric pipeline.
 
         Args:
-            inputs: list of floats (signal values)
+            inputs: list of floats (784 for MNIST, 11 for Snake, etc.)
 
         Returns:
             list of output_size logits
         """
-        # 1. Embed input to S³
-        input_quats = self._embed_to_quaternions(inputs)
+        geo = _get_geo()
+        kernel = _get_pixel_kernel(self.input_size)
 
-        # 2. Hidden layer: left-multiply (cross-fiber mixing) + right-multiply (phase)
-        #    Then apply Lüneburg/Poincaré conformal warp (replaces per-component tanh)
-        hidden_quats = []
-        for h in range(self.n_quat_hidden):
-            # Aggregate input quaternions via sequential left multiplication
-            # Each hidden unit combines all inputs through its learned rotations
-            accum = [1.0, 0.0, 0.0, 0.0]  # identity
-            for j in range(min(len(input_quats), len(self.left_quats[h]))):
-                # Left-multiply input by learned quaternion (changes fiber)
-                rotated = quat_multiply(self.left_quats[h][j], input_quats[j])
-                # Accumulate via quaternion multiplication (composition of rotations)
-                accum = quat_multiply(accum, rotated)
+        # --- Step 2: Project input onto 600-cell vertices ---
+        x = np.array(inputs, dtype=np.float64)
+        if len(x) < self.input_size:
+            x = np.pad(x, (0, self.input_size - len(x)))
+        x = x[:self.input_size]
 
-            # Right-multiply by phase quaternion (within-fiber rotation)
-            accum = quat_multiply(accum, self.right_quats[h])
+        # Soft assignment: (input_size,) @ (input_size, 120) → (120,)
+        f = x @ kernel  # signal on 120 vertices
 
-            # Lüneburg conformal warp on the imaginary part (preserves geometry)
-            # r' = 2*tanh(r/2) applied radially — conformal, angle-preserving
-            # This replaces per-component tanh with a geometry-respecting nonlinearity
-            im_part = luneburg_warp([accum[1], accum[2], accum[3]])
-            accum = [accum[0], im_part[0], im_part[1], im_part[2]]
+        # --- Step 3: Spectral decomposition ---
 
-            hidden_quats.append(quat_normalize(accum))
+        # Scalar eigenspaces
+        E0_vecs = geo["scalar_eigenspaces"][0]["vectors"]  # (120, 1)
+        E1_vecs = geo["scalar_eigenspaces"][1]["vectors"]  # (120, 4)
+        E2_vecs = geo["scalar_eigenspaces"][2]["vectors"]  # (120, 9)
 
-        # 3. Hopf projection: S³ → S² (THIS IS THE NONLINEARITY)
-        hidden_s2 = [hopf_project(q) for q in hidden_quats]
+        a0 = E0_vecs.T @ f  # (1,)
+        a1 = E1_vecs.T @ f  # (4,)
+        a2 = E2_vecs.T @ f  # (9,)
 
-        # 4. Section lifting: S² → S³ with learned phases
-        lifted = []
-        for i, s2_point in enumerate(hidden_s2):
-            lifted.append(hopf_lift(s2_point, self.lift_phases[i]))
+        # Curl eigenspace: compute discrete gradient on edges, then project
+        d0 = geo["d0"]  # (720, 120)
+        df = d0 @ f      # discrete gradient, (720,)
 
-        # 5. Output layer: another round of geometric operations
-        output_s2 = []
-        for o in range(self.n_quat_out):
-            accum = [1.0, 0.0, 0.0, 0.0]
-            for j in range(min(len(lifted), len(self.out_left_quats[o]))):
-                rotated = quat_multiply(self.out_left_quats[o][j], lifted[j])
-                accum = quat_multiply(accum, rotated)
-            accum = quat_multiply(accum, self.out_right_quats[o])
-            accum = quat_normalize(accum)
-            # Project to S²
-            output_s2.append(hopf_project(accum))
+        C1_vecs = geo["curl_eigenspaces"][0]["vectors"]  # (720, 6)
+        c1 = C1_vecs.T @ df  # (6,)
 
-        # 6. Read out logits from S² coordinates
-        # Each S² point gives 3 coordinates in [-1, 1]
-        # Flatten and take first output_size values
-        flat = []
-        for s2 in output_s2:
-            flat.extend(s2)
+        # --- Step 4: Irrep-respecting rotations + Poincaré warp ---
 
-        # Pad if needed, truncate to output_size
-        while len(flat) < self.output_size:
-            flat.append(0.0)
-        return flat[:self.output_size]
+        # E0 (1D): just scale
+        a0_transformed = poincare_warp(a0 * self.s0)
+
+        # E1 (4D): SO(4) rotation via quaternion pair, then warp
+        a1_rotated = apply_so4_rotation(a1, self.qL1, self.qR1)
+        a1_transformed = poincare_warp(a1_rotated)
+
+        # E2 (9D): Givens rotations, then warp
+        a2_rotated = apply_givens_rotations(a2, self.givens2, self.GIVENS_PAIRS)
+        a2_transformed = poincare_warp(a2_rotated)
+
+        # C1 (6D): scale, then warp
+        c1_transformed = poincare_warp(c1 * self.curl_scale)
+
+        # --- Step 5: Concatenate and readout ---
+        features = np.concatenate([
+            a0_transformed,   # 1
+            a1_transformed,   # 4
+            a2_transformed,   # 9
+            c1_transformed,   # 6
+        ])  # total: 20
+
+        logits = self.W_out @ features + self.b_out
+
+        return logits.tolist()
 
     def select_action(self, signals, signal_order):
         """
         Select action from signal dictionary.
         Same interface as Controller.
-
-        Args:
-            signals: dict of signal_name → value
-            signal_order: list of signal names in order
-
-        Returns:
-            int: action index
         """
         inputs = [signals.get(k, 0.0) for k in signal_order]
-        outputs = self.forward(inputs)
-        return outputs.index(max(outputs))
+        logits = self.forward(inputs)
+        return logits.index(max(logits))
 
     def mutate(self, rate=0.1, scale=0.3):
         """
-        Geodesic mutation on S³.
-        Instead of additive Gaussian noise on flat weights,
-        we perturb quaternion parameters along geodesics.
+        Mutate evolved parameters.
 
-        Args:
-            rate: probability of mutating each parameter
-            scale: magnitude of geodesic perturbation
+        Quaternions: geodesic perturbation on S³.
+        Angles: additive Gaussian (wraps naturally).
+        Scales: scale-relative Gaussian.
+        Readout weights: standard GENREG additive Gaussian.
         """
-        # Mutate left quaternions (layer 1)
-        for h in range(self.n_quat_hidden):
-            for j in range(len(self.left_quats[h])):
-                if random.random() < rate:
-                    self.left_quats[h][j] = geodesic_perturb(self.left_quats[h][j], scale)
-
-        # Mutate right quaternions (layer 1)
-        for h in range(self.n_quat_hidden):
-            if random.random() < rate:
-                self.right_quats[h] = geodesic_perturb(self.right_quats[h], scale)
-
-        # Mutate lift phases
-        for i in range(self.n_quat_hidden):
-            if random.random() < rate:
-                self.lift_phases[i] += random.gauss(0, scale)
-                # Keep in [-π, π]
-                self.lift_phases[i] = ((self.lift_phases[i] + math.pi) % (2 * math.pi)) - math.pi
-
-        # Mutate output left quaternions
-        for o in range(self.n_quat_out):
-            for j in range(len(self.out_left_quats[o])):
-                if random.random() < rate:
-                    self.out_left_quats[o][j] = geodesic_perturb(self.out_left_quats[o][j], scale)
-
-        # Mutate output right quaternions
-        for o in range(self.n_quat_out):
-            if random.random() < rate:
-                self.out_right_quats[o] = geodesic_perturb(self.out_right_quats[o], scale)
+        self.s0 = mutate_scale(self.s0, rate, scale)
+        self.qL1 = mutate_quaternion(self.qL1, rate, scale)
+        self.qR1 = mutate_quaternion(self.qR1, rate, scale)
+        self.givens2 = [mutate_angle(a, rate, scale) for a in self.givens2]
+        self.curl_scale = mutate_scale(self.curl_scale, rate, scale)
+        mutate_flat_2d(self.W_out, rate, scale)
+        mutate_flat(self.b_out, rate, scale)
 
     def clone(self):
         """Create a deep copy of this controller."""
-        c = HopfController(self.input_size, self.hidden_size, self.output_size)
-        c.n_quat_hidden = self.n_quat_hidden
-        c.n_quat_input = self.n_quat_input
-        c.n_quat_out = self.n_quat_out
-
-        c.left_quats = [[q[:] for q in row] for row in self.left_quats]
-        c.right_quats = [q[:] for q in self.right_quats]
-        c.lift_phases = self.lift_phases[:]
-        c.out_left_quats = [[q[:] for q in row] for row in self.out_left_quats]
-        c.out_right_quats = [q[:] for q in self.out_right_quats]
+        c = HopfController.__new__(HopfController)
+        c.input_size = self.input_size
+        c.hidden_size = self.hidden_size
+        c.output_size = self.output_size
+        c.s0 = self.s0
+        c.qL1 = np.quaternion(self.qL1.w, self.qL1.x, self.qL1.y, self.qL1.z)
+        c.qR1 = np.quaternion(self.qR1.w, self.qR1.x, self.qR1.y, self.qR1.z)
+        c.givens2 = self.givens2[:]
+        c.curl_scale = self.curl_scale
+        c.W_out = self.W_out.copy()
+        c.b_out = self.b_out.copy()
         return c
 
     def param_count(self):
-        """Count total scalar parameters."""
-        count = 0
-        # left_quats: n_quat_hidden * n_quat_input * 4
-        count += self.n_quat_hidden * self.n_quat_input * 4
-        # right_quats: n_quat_hidden * 4
-        count += self.n_quat_hidden * 4
-        # lift_phases: n_quat_hidden
-        count += self.n_quat_hidden
-        # out_left_quats: n_quat_out * n_quat_hidden * 4
-        count += self.n_quat_out * self.n_quat_hidden * 4
-        # out_right_quats: n_quat_out * 4
-        count += self.n_quat_out * 4
-        return count
+        """Total scalar parameters (evolved only)."""
+        return (
+            1 +                              # s0
+            4 + 4 +                          # qL1, qR1 (4 each, 3 DOF each)
+            len(self.givens2) +              # Givens angles
+            1 +                              # curl_scale
+            self.W_out.size +                # readout weights
+            self.b_out.size                  # readout bias
+        )
 
     def effective_dof(self):
-        """
-        Count effective degrees of freedom.
-        Each unit quaternion has 3 DOF (constrained to S³).
-        Phases have 1 DOF each.
-        """
-        n_quats = (
-            self.n_quat_hidden * self.n_quat_input +  # left_quats
-            self.n_quat_hidden +                        # right_quats
-            self.n_quat_out * self.n_quat_hidden +     # out_left_quats
-            self.n_quat_out                             # out_right_quats
+        """Effective degrees of freedom (accounting for S³ constraints)."""
+        return (
+            1 +                              # s0
+            3 + 3 +                          # qL1, qR1 (3 DOF each on S³)
+            len(self.givens2) +              # Givens angles
+            1 +                              # curl_scale
+            self.W_out.size +                # readout (unconstrained)
+            self.b_out.size
         )
-        return n_quats * 3 + self.n_quat_hidden  # 3 per quaternion + 1 per phase
 
     def to_dict(self):
         """Serialize to dictionary."""
@@ -466,32 +436,29 @@ class HopfController:
             "input_size": self.input_size,
             "hidden_size": self.hidden_size,
             "output_size": self.output_size,
-            "n_quat_hidden": self.n_quat_hidden,
-            "n_quat_input": self.n_quat_input,
-            "n_quat_out": self.n_quat_out,
-            "left_quats": self.left_quats,
-            "right_quats": self.right_quats,
-            "lift_phases": self.lift_phases,
-            "out_left_quats": self.out_left_quats,
-            "out_right_quats": self.out_right_quats,
+            "s0": self.s0,
+            "qL1": [self.qL1.w, self.qL1.x, self.qL1.y, self.qL1.z],
+            "qR1": [self.qR1.w, self.qR1.x, self.qR1.y, self.qR1.z],
+            "givens2": self.givens2,
+            "curl_scale": self.curl_scale,
+            "W_out": self.W_out.tolist(),
+            "b_out": self.b_out.tolist(),
         }
 
     @classmethod
     def from_dict(cls, d):
         """Deserialize from dictionary."""
-        c = cls(d["input_size"], d["hidden_size"], d["output_size"])
-        c.n_quat_hidden = d["n_quat_hidden"]
-        c.n_quat_input = d["n_quat_input"]
-        c.n_quat_out = d["n_quat_out"]
-
-        if d.get("left_quats"):
-            c.left_quats = d["left_quats"]
-        if d.get("right_quats"):
-            c.right_quats = d["right_quats"]
-        if d.get("lift_phases"):
-            c.lift_phases = d["lift_phases"]
-        if d.get("out_left_quats"):
-            c.out_left_quats = d["out_left_quats"]
-        if d.get("out_right_quats"):
-            c.out_right_quats = d["out_right_quats"]
+        c = cls.__new__(cls)
+        c.input_size = d["input_size"]
+        c.hidden_size = d.get("hidden_size", 16)
+        c.output_size = d["output_size"]
+        c.s0 = d["s0"]
+        q = d["qL1"]
+        c.qL1 = np.quaternion(q[0], q[1], q[2], q[3])
+        q = d["qR1"]
+        c.qR1 = np.quaternion(q[0], q[1], q[2], q[3])
+        c.givens2 = d["givens2"]
+        c.curl_scale = d["curl_scale"]
+        c.W_out = np.array(d["W_out"], dtype=np.float64)
+        c.b_out = np.array(d["b_out"], dtype=np.float64)
         return c
