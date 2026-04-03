@@ -369,15 +369,23 @@ class HopfController:
         # --- E₂ (9D): Givens rotations ---
         self.givens2 = [0.0] * len(self.GIVENS_PAIRS_E2)
 
-        # --- C₁ (6D): scale ---
-        self.curl_scale = 1.0
+        # --- E₃ (16D), E₄ (25D), E₅ (36D): per-eigenspace learned scales ---
+        self.scale_e3 = 1.0
+        self.scale_e4 = 1.0
+        self.scale_e5 = 1.0
+
+        # --- Curl eigenspaces: C₁ (6D), C₂ (16D), C₃ (30D), C₄ (48D) ---
+        self.curl_scales = [1.0, 1.0, 1.0, 1.0]
 
         # --- Readout ---
         # Features from E₁ pipeline: 3 S² coords per stage + holonomy phases
         #   = 3 * N_STAGES + (N_STAGES - 1) berry phases + (N_STAGES - 1) transport phases
         n_e1_features = 3 * self.N_HOPF_STAGES + 2 * (self.N_HOPF_STAGES - 1)
-        # Features from other eigenspaces: 1 (E₀) + 9 (E₂) + 6 (C₁) = 16
-        n_other_features = 1 + 9 + 6
+        # Features from all other eigenspaces:
+        #   E₀(1) + E₂(9) + E₃(16) + E₄(25) + E₅(36) = 87
+        #   C₁(6) + C₂(16) + C₃(30) + C₄(48) = 100
+        #   Total other: 187
+        n_other_features = 1 + 9 + 16 + 25 + 36 + 6 + 16 + 30 + 48
         self.n_features = n_e1_features + n_other_features
 
         xavier_scale = math.sqrt(2.0 / (self.n_features + output_size))
@@ -460,21 +468,21 @@ class HopfController:
 
         f = x @ kernel  # signal on 120 vertices
 
-        # --- Spectral decomposition ---
-        E0_vecs = geo["scalar_eigenspaces"][0]["vectors"]
-        E1_vecs = geo["scalar_eigenspaces"][1]["vectors"]
-        E2_vecs = geo["scalar_eigenspaces"][2]["vectors"]
-
-        a0 = E0_vecs.T @ f  # (1,)
-        a1 = E1_vecs.T @ f  # (4,)
-        a2 = E2_vecs.T @ f  # (9,)
+        # --- Spectral decomposition: ALL eigenspaces ---
+        scalar_coeffs = []
+        for es in geo["scalar_eigenspaces"]:  # E0..E5
+            scalar_coeffs.append(es["vectors"].T @ f)
 
         d0 = geo["d0"]
-        df = d0 @ f
-        C1_vecs = geo["curl_eigenspaces"][0]["vectors"]
-        c1 = C1_vecs.T @ df  # (6,)
+        df = d0 @ f  # discrete gradient on edges
+        curl_coeffs = []
+        for es in geo["curl_eigenspaces"]:  # C1..C4
+            curl_coeffs.append(es["vectors"].T @ df)
 
-        # --- E₁: Multi-stage Hopf pipeline (the geometric core) ---
+        a0, a1, a2, a3, a4, a5 = scalar_coeffs
+        c1, c2, c3, c4 = curl_coeffs
+
+        # --- E₁ (4D): Multi-stage Hopf pipeline (the geometric core) ---
         e1_features = self._e1_pipeline(a1)
 
         # --- E₀ (1D): scale + warp ---
@@ -484,15 +492,29 @@ class HopfController:
         a2_rotated = apply_givens_rotations(a2, self.givens2, self.GIVENS_PAIRS_E2)
         e2_features = poincare_warp(a2_rotated)
 
-        # --- C₁ (6D): scale + warp ---
-        c1_features = poincare_warp(c1 * self.curl_scale)
+        # --- E₃ (16D), E₄ (25D), E₅ (36D): scale + warp ---
+        e3_features = poincare_warp(a3 * self.scale_e3)
+        e4_features = poincare_warp(a4 * self.scale_e4)
+        e5_features = poincare_warp(a5 * self.scale_e5)
 
-        # --- Concatenate all geometric features ---
+        # --- C₁ (6D), C₂ (16D), C₃ (30D), C₄ (48D): scale + warp ---
+        c1_features = poincare_warp(c1 * self.curl_scales[0])
+        c2_features = poincare_warp(c2 * self.curl_scales[1])
+        c3_features = poincare_warp(c3 * self.curl_scales[2])
+        c4_features = poincare_warp(c4 * self.curl_scales[3])
+
+        # --- Concatenate ALL geometric features ---
         features = np.concatenate([
-            e1_features,   # 3*N_STAGES + 2*(N_STAGES-1)
+            e1_features,   # 3*N_STAGES + 2*(N_STAGES-1) = 13
             e0_features,   # 1
             e2_features,   # 9
+            e3_features,   # 16
+            e4_features,   # 25
+            e5_features,   # 36
             c1_features,   # 6
+            c2_features,   # 16
+            c3_features,   # 30
+            c4_features,   # 48
         ])
 
         # --- Minimal readout ---
@@ -524,7 +546,10 @@ class HopfController:
         # Other eigenspaces
         self.s0 = mutate_scale(self.s0, rate, scale)
         self.givens2 = [mutate_angle(a, rate, scale) for a in self.givens2]
-        self.curl_scale = mutate_scale(self.curl_scale, rate, scale)
+        self.scale_e3 = mutate_scale(self.scale_e3, rate, scale)
+        self.scale_e4 = mutate_scale(self.scale_e4, rate, scale)
+        self.scale_e5 = mutate_scale(self.scale_e5, rate, scale)
+        self.curl_scales = [mutate_scale(s, rate, scale) for s in self.curl_scales]
 
         # Readout
         mutate_flat_2d(self.W_out, rate, scale)
@@ -545,7 +570,10 @@ class HopfController:
 
         c.s0 = self.s0
         c.givens2 = self.givens2[:]
-        c.curl_scale = self.curl_scale
+        c.scale_e3 = self.scale_e3
+        c.scale_e4 = self.scale_e4
+        c.scale_e5 = self.scale_e5
+        c.curl_scales = self.curl_scales[:]
         c.W_out = self.W_out.copy()
         c.b_out = self.b_out.copy()
         return c
@@ -559,7 +587,8 @@ class HopfController:
             n_phases +                # lift phases
             1 +                       # s0
             len(self.givens2) +       # Givens angles
-            1 +                       # curl_scale
+            3 +                       # scale_e3, scale_e4, scale_e5
+            4 +                       # curl_scales (4 eigenspaces)
             self.W_out.size +         # readout weights
             self.b_out.size           # readout bias
         )
@@ -571,9 +600,10 @@ class HopfController:
         return (
             n_rotors * 3 +           # 3 DOF per rotor
             n_phases +
-            1 +
-            len(self.givens2) +
-            1 +
+            1 +                       # s0
+            len(self.givens2) +       # Givens
+            3 +                       # scale_e3..e5
+            4 +                       # curl_scales
             self.W_out.size +
             self.b_out.size
         )
@@ -594,7 +624,10 @@ class HopfController:
             "e1_lift_phases": self.e1_lift_phases,
             "s0": self.s0,
             "givens2": self.givens2,
-            "curl_scale": self.curl_scale,
+            "scale_e3": self.scale_e3,
+            "scale_e4": self.scale_e4,
+            "scale_e5": self.scale_e5,
+            "curl_scales": self.curl_scales,
             "W_out": self.W_out.tolist(),
             "b_out": self.b_out.tolist(),
         }
@@ -617,7 +650,10 @@ class HopfController:
 
         c.s0 = d["s0"]
         c.givens2 = d["givens2"]
-        c.curl_scale = d["curl_scale"]
+        c.scale_e3 = d.get("scale_e3", 1.0)
+        c.scale_e4 = d.get("scale_e4", 1.0)
+        c.scale_e5 = d.get("scale_e5", 1.0)
+        c.curl_scales = d.get("curl_scales", [1.0, 1.0, 1.0, 1.0])
         c.W_out = np.array(d["W_out"], dtype=np.float64)
         c.b_out = np.array(d["b_out"], dtype=np.float64)
 
