@@ -390,9 +390,9 @@ def get_geometry():
     _CACHE["edges"] = edges                          # list of (i, j)
     _CACHE["triangles"] = triangles                  # list of (i, j, k)
 
-    # Scalar eigenspaces (Theorem 3): E0..E5
+    # Scalar eigenspaces: E0..E5 (clean, Theorem 3) + E6..E8 (aliased)
     _CACHE["scalar_eigenspaces"] = []
-    for i, (lam, vecs) in enumerate(scalar_groups[:6]):
+    for i, (lam, vecs) in enumerate(scalar_groups):
         _CACHE["scalar_eigenspaces"].append({
             "eigenvalue": lam,
             "vectors": vecs,          # (120, multiplicity)
