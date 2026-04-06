@@ -412,6 +412,46 @@ def get_geometry():
     # Incidence matrix for computing edge signals
     _CACHE["d0"] = d0                                # (720, 120)
 
+    # -------------------------------------------------------
+    # McKay correspondence: eigenspaces → extended E₈ Dynkin diagram
+    # The 9 eigenspace multiplicities are d² for irrep dims d.
+    # These dims match the marks of Ê₈. The adjacency structure
+    # of Ê₈ constrains which irreps can interact.
+    # -------------------------------------------------------
+    irrep_dims = [int(round(es["multiplicity"] ** 0.5))
+                  for es in _CACHE["scalar_eigenspaces"]]
+
+    # Extended E₈ Dynkin diagram:
+    #   [1]--[2]--[3]--[4]--[5]--[6]--[4']--[2']
+    #                        |
+    #                       [3']
+    # Marks (= irrep dimensions): [1, 2, 3, 4, 5, 6, 4, 2, 3]
+    e8_marks = [1, 2, 3, 4, 5, 6, 4, 2, 3]
+    e8_edges = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (4, 8)]
+
+    e8_adj = np.zeros((9, 9), dtype=np.float64)
+    for i, j in e8_edges:
+        e8_adj[i, j] = 1.0
+        e8_adj[j, i] = 1.0
+
+    # Map eigenspace index → E₈ node index (matching irrep dimensions)
+    # E0(d=1)→0, E1(d=2)→1, E2(d=3)→2, E3(d=4)→3, E4(d=5)→4,
+    # E5(d=6)→5, E6(d=3)→8, E7(d=4)→6, E8(d=2)→7
+    eigenspace_to_e8 = [0, 1, 2, 3, 4, 5, 8, 6, 7]
+
+    # Verify dimensions match
+    for i, node in enumerate(eigenspace_to_e8):
+        assert irrep_dims[i] == e8_marks[node], \
+            f"McKay mismatch: E{i} dim {irrep_dims[i]} != E8 node {node} mark {e8_marks[node]}"
+
+    _CACHE["e8_adjacency"] = e8_adj
+    _CACHE["e8_edges"] = e8_edges
+    _CACHE["e8_marks"] = e8_marks
+    _CACHE["eigenspace_to_e8"] = eigenspace_to_e8
+    _CACHE["irrep_dims"] = irrep_dims
+
+    print(f"  McKay: irrep dims {irrep_dims} → E₈ marks {e8_marks} ✓")
+
     print("[cell600] Geometry construction complete.")
     return _CACHE
 
