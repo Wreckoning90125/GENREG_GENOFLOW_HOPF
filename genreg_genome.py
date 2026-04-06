@@ -4,6 +4,7 @@
 # ================================================================
 
 from genreg_controller import Controller
+from hopf_controller import HopfController
 from genreg_proteins import (
     SensorProtein, TrendProtein, TrustModifierProtein,
     ComparatorProtein, IntegratorProtein, GateProtein,
@@ -19,9 +20,16 @@ class Genome:
     - Trust score (fitness)
     """
 
-    def __init__(self, proteins=None, controller=None, signal_order=None):
+    def __init__(self, proteins=None, controller=None, signal_order=None,
+                 controller_type="mlp", input_size=11, hidden_size=16, output_size=4):
         self.proteins = proteins if proteins else self._default_proteins()
-        self.controller = controller if controller else Controller()
+        self.controller_type = controller_type
+        if controller is not None:
+            self.controller = controller
+        elif controller_type == "hopf":
+            self.controller = HopfController(input_size, hidden_size, output_size)
+        else:
+            self.controller = Controller(input_size, hidden_size, output_size)
         self.signal_order = signal_order  # Signal names in order (from Sensor)
         self.trust = 0.0
         self.lifetime_steps = 0
@@ -91,9 +99,7 @@ class Genome:
 
         # Reset protein states
         for p in self.proteins:
-            p.state = {}
-            if hasattr(p, 'trust_output'):
-                p.trust_output = 0.0
+            p.reset_state()
 
     def mutate(self, rate=0.1, scale=0.3):
         """Mutate both controller and protein parameters."""
@@ -113,9 +119,18 @@ class Genome:
             new_proteins.append(new_p)
 
         new_controller = self.controller.clone()
-        g = Genome(proteins=new_proteins, controller=new_controller, signal_order=self.signal_order)
+        g = Genome(proteins=new_proteins, controller=new_controller,
+                   signal_order=self.signal_order,
+                   controller_type=self.controller_type)
         g.trust = self.trust
         return g
+
+    def crossover(self, other):
+        """Create offspring by crossing controller params from two genomes."""
+        child = self.clone()
+        if hasattr(self.controller, 'crossover'):
+            child.controller = self.controller.crossover(other.controller)
+        return child
 
     def to_dict(self):
         """Serialize genome to dictionary."""
@@ -124,6 +139,7 @@ class Genome:
             "lifetime_steps": self.lifetime_steps,
             "food_eaten": self.food_eaten,
             "signal_order": self.signal_order,
+            "controller_type": self.controller_type,
             "controller": self.controller.to_dict(),
             "proteins": [
                 {
@@ -139,7 +155,13 @@ class Genome:
     @classmethod
     def from_dict(cls, d):
         """Deserialize genome from dictionary."""
-        controller = Controller.from_dict(d["controller"])
+        controller_type = d.get("controller_type", "mlp")
+        ctrl_data = d["controller"]
+        if controller_type == "hopf" or ctrl_data.get("type") == "hopf":
+            controller = HopfController.from_dict(ctrl_data)
+            controller_type = "hopf"
+        else:
+            controller = Controller.from_dict(ctrl_data)
         signal_order = d.get("signal_order", None)
 
         protein_classes = {
@@ -162,7 +184,8 @@ class Genome:
             p.inputs = pd["inputs"]
             proteins.append(p)
 
-        g = cls(proteins=proteins, controller=controller, signal_order=signal_order)
+        g = cls(proteins=proteins, controller=controller, signal_order=signal_order,
+                controller_type=controller_type)
         g.trust = d.get("trust", 0.0)
         g.lifetime_steps = d.get("lifetime_steps", 0)
         g.food_eaten = d.get("food_eaten", 0)

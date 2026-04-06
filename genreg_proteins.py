@@ -36,6 +36,11 @@ class Protein:
         # Hyperparameters
         self.params = {}
 
+    def reset_state(self):
+        """Reset state to defaults. Override in subclasses for custom defaults."""
+        self.state = {}
+        self.output = 0.0
+
     # ------------------------------------------------------------
     def bind_inputs(self, inputs):
         """Bind list of input names OR callable protein references."""
@@ -76,12 +81,19 @@ class SensorProtein(Protein):
     def __init__(self, signal_name):
         super().__init__(signal_name, "sensor")
         self.params["decay"] = 0.999
-        
-        self.state["running_max"] = 1.0
-        self.state["count"] = 0
+        self.reset_state()
+
+    def reset_state(self):
+        self.state = {"running_max": 1.0, "count": 0}
+        self.output = 0.0
 
     def forward(self, signals, protein_outputs):
         raw = signals.get(self.name, 0.0)
+
+        # Initialize state if cleared by genome.reset()
+        if "running_max" not in self.state:
+            self.state["running_max"] = 1.0
+            self.state["count"] = 0
 
         # PATCH: Distance signals need ABSOLUTE values preserved
         # Normalization destroys the meaning: "Is food 1 step away or 10?"
@@ -94,7 +106,7 @@ class SensorProtein(Protein):
             # Clamp to reasonable range
             self.output = max(min(self.output, 2.0), 0.0)
             return self.output
-        
+
         # For other signals (steps_alive, etc.), use adaptive normalization
         # Track maximum absolute value seen
         self.state["running_max"] = max(
@@ -162,9 +174,11 @@ class TrendProtein(Protein):
     def __init__(self, name):
         super().__init__(name, "trend")
         self.params["momentum"] = 0.9
+        self.reset_state()
 
-        self.state["last"] = None
-        self.state["velocity"] = 0.0
+    def reset_state(self):
+        self.state = {"last": None, "velocity": 0.0}
+        self.output = 0.0
 
     def forward(self, signals, protein_outputs):
         # Only one input allowed
@@ -202,8 +216,11 @@ class IntegratorProtein(Protein):
     def __init__(self, name):
         super().__init__(name, "integrator")
         self.params["decay"] = 0.05
+        self.reset_state()
 
-        self.state["accum"] = 0.0
+    def reset_state(self):
+        self.state = {"accum": 0.0}
+        self.output = 0.0
 
     def forward(self, signals, protein_outputs):
         if len(self.inputs) < 1:
@@ -229,8 +246,11 @@ class GateProtein(Protein):
         super().__init__(name, "gate")
         self.params["threshold"] = 0.0
         self.params["hysteresis"] = 0.1
+        self.reset_state()
 
-        self.state["active"] = False
+    def reset_state(self):
+        self.state = {"active": False}
+        self.output = 0.0
 
     def forward(self, signals, protein_outputs):
         if len(self.inputs) < 2:
@@ -265,10 +285,11 @@ class TrustModifierProtein(Protein):
         self.params["gain"] = 1.0
         self.params["scale"] = 1.0
         self.params["decay"] = 0.999
+        self.reset_state()
 
-        self.state["running"] = 0.0
-
-        # Final trust output from this protein
+    def reset_state(self):
+        self.state = {"running": 0.0}
+        self.output = 0.0
         self.trust_output = 0.0
 
     def forward(self, signals, protein_outputs):
