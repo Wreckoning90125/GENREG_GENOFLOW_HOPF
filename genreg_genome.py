@@ -125,6 +125,13 @@ class Genome:
         g.trust = self.trust
         return g
 
+    def crossover(self, other):
+        """Create offspring by crossing controller params from two genomes."""
+        child = self.clone()
+        if hasattr(self.controller, 'crossover'):
+            child.controller = self.controller.crossover(other.controller)
+        return child
+
     def to_dict(self):
         """Serialize genome to dictionary."""
         return {

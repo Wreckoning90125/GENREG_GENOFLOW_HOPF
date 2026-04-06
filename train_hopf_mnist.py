@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
-GENREG × Hopf MNIST Training Script
+GENREG × Hopf MNIST Training Script — v6
 
 Evolves a Hopf geometric controller to classify MNIST digits.
 Uses GENREG's trust-based evolutionary engine with the HopfController
 computing entirely on S³ via Hopf fibration geometry.
+
+v6 changes:
+  - Per-eigenspace Hopf projections (50 features vs 36)
+  - Crossover between parents (uniform, 30% rate)
+  - Adaptive mutation scale (decays over training)
+  - Half-scale readout mutation (preserves learned structure)
+  - Direct pixel path (skip dict overhead)
 
 Usage:
     python train_hopf_mnist.py [--generations 500] [--pop-size 50] [--batch-size 100]
 
 Comparison targets:
     - GENREG_ALPHA_MNIST (MLP): 81.47% with 50,890 params
-    - This (Hopf): target competitive accuracy with ~100 params
+    - This (Hopf v6): ~582 params
 """
 
 import argparse
@@ -69,14 +76,10 @@ def evaluate_genome(genome, env, signal_order):
     signals = env.reset()
 
     while True:
-        # Get pixel values directly for the controller
+        # Direct pixel path — skip dict overhead
         pixels = env.get_pixel_signals()
-
-        # Controller classifies from raw pixels
-        action = genome.controller.select_action(
-            {f"pixel_{i:03d}": px for i, px in enumerate(pixels)},
-            [f"pixel_{i:03d}" for i in range(len(pixels))]
-        )
+        logits = genome.controller.forward(pixels)
+        action = logits.index(max(logits))
 
         # Step environment with classification
         signals, done = env.step(action)
@@ -101,13 +104,18 @@ def evaluate_population(genomes, env, signal_order):
 
 
 # ================================================================
-# Evolution
+# Evolution with crossover + adaptive mutation
 # ================================================================
 
 def evolve(genomes, survival_rate=0.2, mutation_rate=0.15, mutation_scale=0.2,
-           trust_inheritance=0.5):
+           trust_inheritance=0.5, crossover_rate=0.3):
     """
-    One generation of evolution. Matches GENREG Population.evolve() logic.
+    One generation of evolution with crossover.
+
+    - Truncation selection (top survival_rate)
+    - Elitism (best preserved unchanged)
+    - Crossover: with probability crossover_rate, blend two parents
+    - Mutation: Gaussian perturbation on all offspring
     """
     # Sort by trust (descending)
     genomes.sort(key=lambda g: g.trust, reverse=True)
@@ -120,12 +128,23 @@ def evolve(genomes, survival_rate=0.2, mutation_rate=0.15, mutation_scale=0.2,
     # Elitism: keep best unchanged
     new_genomes.append(survivors[0].clone())
 
-    # Fill with mutated offspring
+    # Fill with crossover/mutated offspring
     while len(new_genomes) < len(genomes):
-        parent = random.choice(survivors)
-        child = parent.clone()
+        parent1 = random.choice(survivors)
+
+        if random.random() < crossover_rate and n_survivors > 1:
+            # Crossover: blend two parents
+            parent2 = random.choice(survivors)
+            while parent2 is parent1 and n_survivors > 1:
+                parent2 = random.choice(survivors)
+            child_ctrl = parent1.controller.crossover(parent2.controller)
+            child = parent1.clone()
+            child.controller = child_ctrl
+        else:
+            child = parent1.clone()
+
         child.mutate(mutation_rate, mutation_scale)
-        child.trust = parent.trust * trust_inheritance
+        child.trust = parent1.trust * trust_inheritance
         new_genomes.append(child)
 
     return new_genomes
@@ -136,20 +155,21 @@ def evolve(genomes, survival_rate=0.2, mutation_rate=0.15, mutation_scale=0.2,
 # ================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="GENREG × Hopf MNIST Training")
+    parser = argparse.ArgumentParser(description="GENREG × Hopf MNIST Training v6")
     parser.add_argument("--generations", type=int, default=500)
     parser.add_argument("--pop-size", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=100,
                         help="MNIST digits per episode")
     parser.add_argument("--hidden-size", type=int, default=16,
                         help="Quaternion hidden units (actual = hidden_size//4)")
-    parser.add_argument("--mutation-rate", type=float, default=0.15)
+    parser.add_argument("--mutation-rate", type=float, default=0.2)
     parser.add_argument("--mutation-scale", type=float, default=0.2)
     parser.add_argument("--survival-rate", type=float, default=0.2)
-    parser.add_argument("--eval-interval", type=int, default=10,
+    parser.add_argument("--crossover-rate", type=float, default=0.3)
+    parser.add_argument("--eval-interval", type=int, default=25,
                         help="Generations between test set evaluations")
     parser.add_argument("--save-interval", type=int, default=50)
-    parser.add_argument("--save-dir", type=str, default="checkpoints")
+    parser.add_argument("--save-dir", type=str, default="checkpoints/hopf_v6_spectral")
     parser.add_argument("--controller", type=str, default="hopf",
                         choices=["hopf", "mlp"],
                         help="Controller type (hopf or mlp for comparison)")
@@ -158,13 +178,15 @@ def main():
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--test-rotated", action="store_true",
                         help="Also test on randomly rotated digits (zero-shot)")
+    parser.add_argument("--no-adaptive", action="store_true",
+                        help="Disable adaptive mutation scale decay")
     args = parser.parse_args()
 
     if args.seed is not None:
         random.seed(args.seed)
 
     print("=" * 60)
-    print("GENREG x Hopf MNIST Training")
+    print("GENREG x Hopf MNIST Training v6")
     print("=" * 60)
     print(f"Controller:     {args.controller}")
     print(f"Population:     {args.pop_size}")
@@ -172,7 +194,9 @@ def main():
     print(f"Batch size:     {args.batch_size}")
     print(f"Hidden size:    {args.hidden_size}")
     print(f"Mutation:       rate={args.mutation_rate}, scale={args.mutation_scale}")
+    print(f"Crossover:      rate={args.crossover_rate}")
     print(f"Survival rate:  {args.survival_rate}")
+    print(f"Adaptive scale: {'OFF' if args.no_adaptive else 'ON (2x→0.5x)'}")
 
     # Create environments
     train_env = MNISTEnvironment(split="train", batch_size=args.batch_size,
@@ -204,8 +228,8 @@ def main():
     if hasattr(sample, 'param_count'):
         print(f"Param count:    {sample.param_count()}")
         print(f"Effective DOF:  {sample.effective_dof()}")
+        print(f"Features:       {sample.n_features}")
     else:
-        # MLP param count
         pc = (sample.input_size * sample.hidden_size + sample.hidden_size +
               sample.hidden_size * sample.output_size + sample.output_size)
         print(f"Param count:    {pc}")
@@ -215,8 +239,17 @@ def main():
     best_test_acc = 0.0
     history = []
 
+    base_scale = args.mutation_scale
+
     for gen in range(args.generations):
         t0 = time.time()
+
+        # Adaptive mutation scale: broad early, fine late
+        if args.no_adaptive:
+            scale = base_scale
+        else:
+            progress = gen / max(args.generations - 1, 1)
+            scale = base_scale * (2.0 - 1.5 * progress)
 
         # Evaluate population on training batch
         results = evaluate_population(genomes, train_env, signal_order)
@@ -231,7 +264,7 @@ def main():
 
         # Log
         print(f"Gen {gen:4d} | best={best_acc:.4f} avg={avg_acc:.4f} "
-              f"trust={best_trust:.2f} | {elapsed:.1f}s")
+              f"trust={best_trust:.2f} scale={scale:.3f} | {elapsed:.1f}s")
 
         # Periodic test set evaluation
         if gen % args.eval_interval == 0 or gen == args.generations - 1:
@@ -253,7 +286,8 @@ def main():
                     json.dump(best_genome.to_dict(), f)
 
             entry = {"gen": gen, "train_best": best_acc, "train_avg": avg_acc,
-                     "test": test_acc, "trust": best_trust}
+                     "test": test_acc, "trust": best_trust,
+                     "mutation_scale": scale}
             if args.test_rotated:
                 entry["test_rotated"] = rot_acc
             history.append(entry)
@@ -275,7 +309,8 @@ def main():
             genomes,
             survival_rate=args.survival_rate,
             mutation_rate=args.mutation_rate,
-            mutation_scale=args.mutation_scale,
+            mutation_scale=scale,
+            crossover_rate=args.crossover_rate,
         )
 
     # Final summary

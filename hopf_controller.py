@@ -1,25 +1,23 @@
 # ================================================================
-# Hopf Geometric Controller v5 — ADE-Structured Computation
+# Hopf Geometric Controller v6 — Per-Eigenspace Hopf Projections
 #
-# The ADE classification IS the architecture.
+# v5 problem: only E₁ (4D dipole) got directional Hopf treatment.
+# The other 8 eigenspaces were crushed to scalar norms — discarding
+# all spatial phase information from frequencies that distinguish digits.
 #
-# The 9 eigenspaces of the 600-cell graph Laplacian are the 9 irreps
-# of the binary icosahedral group 2I. Via the McKay correspondence,
-# they map to the 9 nodes of the extended E₈ Dynkin diagram.
-#
-# Information flows along E₈ edges. Adjacent irreps exchange energy;
-# non-adjacent ones can't. The Hopf projection is the nonlinearity.
-# Parallel transport carries phase. Holonomy provides topology.
+# v6 fix: Hopf-project ALL eigenspaces with dim ≥ 4.
+# Each eigenspace's first 4 coefficients are rotated by a learned
+# rotor and Hopf-projected to S², giving 3 directional features
+# per eigenspace. This preserves the fine spatial detail that v5 lost.
 #
 # Pipeline:
-#   1. Input → 600-cell → spectral decomposition into 9 irreps
-#   2. E₁ (4D): multi-stage Hopf pipeline (geometry IS computation)
-#   3. C₁ (6D): Hopf chirality pipeline (6 vs 9 discrimination)
-#   4. Irrep energies → McKay message passing on E₈ Dynkin diagram
-#   5. Poincaré warp per node (nonlinearity)
-#   6. Small readout from 36 geometric features
+#   1. Input → 600-cell → spectral decomposition into 9 irreps + 4 curl
+#   2. Each eigenspace (dim ≥ 4): learned rotor → Hopf S² → 3 features
+#   3. Eigenspace norms → McKay message passing on E₈ → 9 features
+#   4. Curl eigenspaces: same Hopf treatment + norms
+#   5. Linear readout from 50 geometric features
 #
-# ~441 params. The E₈ topology does the work the linear map was doing.
+# ~582 params. Every spectral band now contributes DIRECTION, not just energy.
 # ================================================================
 
 import math
@@ -122,24 +120,13 @@ def poincare_warp(v):
     return v * (2.0 * math.tanh(r / 2.0) / r)
 
 
-def apply_givens(coeffs, angles, pairs):
-    """Givens rotations within an eigenspace."""
-    result = coeffs.copy()
-    for angle, (i, j) in zip(angles, pairs):
-        c, s = math.cos(angle), math.sin(angle)
-        ri = c * result[i] - s * result[j]
-        rj = s * result[i] + c * result[j]
-        result[i], result[j] = ri, rj
-    return result
-
-
 def random_unit_quat():
     v = np.random.randn(4)
     return v / np.linalg.norm(v)
 
 
 # ================================================================
-# Mutation
+# Mutation helpers
 # ================================================================
 
 def mutate_quat(q, rate, scale):
@@ -152,10 +139,6 @@ def mutate_quat(q, rate, scale):
     delta = np.array([math.cos(nv), math.sin(nv)/nv * v[0],
                       math.sin(nv)/nv * v[1], math.sin(nv)/nv * v[2]])
     return qnormalize(qmul(q, delta))
-
-
-def mutate_angle(a, rate, scale):
-    return a + random.gauss(0, scale) if random.random() < rate else a
 
 
 def mutate_scale(s, rate, scale):
@@ -178,7 +161,6 @@ def mutate_flat(arr, rate, scale):
 
 _GEO = None
 _PIXEL_KERNEL = None
-_NORTH = np.array([0.0, 0.0, 1.0])
 
 
 def _get_geo():
@@ -223,96 +205,77 @@ def _get_pixel_kernel(input_size):
 
 
 # ================================================================
-# HopfController v5 — ADE-Structured Geometric Computation
+# HopfController v6 — Per-Eigenspace Hopf Projections
 # ================================================================
 
 class HopfController:
     """
-    The ADE classification IS the architecture.
+    v6: Every eigenspace contributes DIRECTION, not just energy.
 
-    9 eigenspaces → 9 nodes of extended E₈ Dynkin diagram (McKay).
-    Information propagates along E₈ edges with learned couplings.
-    Hopf projection is the nonlinearity. Berry phase carries topology.
-    ~441 parameters.
+    v5 crushed 8 of 9 eigenspaces to scalar norms, losing all spatial
+    phase information. v6 Hopf-projects each eigenspace's first 4D
+    coefficients through a learned rotor, extracting 3 S² directional
+    features per eigenspace. The fine-grained spatial detail that
+    distinguishes "1" from "7" now reaches the classifier.
+
+    50 features from:
+      - 1 scalar (E₀)
+      - 24 Hopf S² coords (8 eigenspaces × 3)
+      - 9 McKay message-passed energies
+      - 12 curl Hopf S² coords (4 curl eigenspaces × 3)
+      - 4 curl norms (Poincaré warped)
+
+    ~582 parameters.
     """
 
-    GIVENS_PAIRS_E2 = [(0, 1), (2, 3), (4, 5), (6, 7)]
-    N_HOPF_STAGES = 3   # E₁ Hopf stages
-    N_C1_STAGES = 2      # C₁ chirality stages
-    N_MCKAY_ROUNDS = 3   # message passing rounds on E₈
+    N_MCKAY_ROUNDS = 3
 
     def __init__(self, input_size=784, hidden_size=16, output_size=10):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.output_size = output_size
 
-        _get_geo()
+        geo = _get_geo()
         _get_pixel_kernel(input_size)
 
-        # E₁ multi-stage Hopf pipeline
-        self.e1_L = [random_unit_quat() for _ in range(self.N_HOPF_STAGES)]
-        self.e1_R = [random_unit_quat() for _ in range(self.N_HOPF_STAGES)]
-        self.e1_phases = [random.uniform(-math.pi, math.pi)
-                          for _ in range(self.N_HOPF_STAGES - 1)]
+        # Per-eigenspace rotors for scalar eigenspaces (right-multiply before Hopf)
+        # E₀ (dim 1) gets None; E₁-E₈ (dim ≥ 4) each get a learned rotor
+        self.sc_rotors = []
+        for es in geo["scalar_eigenspaces"]:
+            if es["multiplicity"] >= 4:
+                self.sc_rotors.append(random_unit_quat())
+            else:
+                self.sc_rotors.append(None)
 
-        # C₁ chirality Hopf pipeline
-        self.c1_L = [random_unit_quat() for _ in range(self.N_C1_STAGES)]
-        self.c1_R = [random_unit_quat() for _ in range(self.N_C1_STAGES)]
-        self.c1_phases = [random.uniform(-math.pi, math.pi)
-                          for _ in range(self.N_C1_STAGES - 1)]
+        # Per-eigenspace rotors for curl eigenspaces (all have dim ≥ 6)
+        self.cu_rotors = [random_unit_quat()
+                          for _ in geo["curl_eigenspaces"]]
 
-        # E₂ Givens
-        self.givens2 = [0.0] * 4
-
-        # McKay message passing: coupling weights on 8 E₈ edges × K rounds
+        # McKay coupling weights on 8 E₈ edges × K rounds
         self.mckay_couplings = np.random.randn(
             self.N_MCKAY_ROUNDS, 8) * 0.1
 
-        # Feature dimensions:
-        #   9 McKay-processed node energies
-        #   4 curl energies (Poincaré warped)
-        #   13 E₁ Hopf features
-        #   10 C₁ chirality features
-        self.n_features = 9 + 4 + 13 + 10  # = 36
+        # Feature count
+        n_sc_hopf = sum(1 for r in self.sc_rotors if r is not None)
+        n_sc_scalar = sum(1 for r in self.sc_rotors if r is None)
+        n_cu = len(self.cu_rotors)
+        self.n_features = (
+            n_sc_scalar +          # E₀ scalar (Poincaré warped)
+            n_sc_hopf * 3 +        # Hopf S² per eigenspace (scaled by norm)
+            9 +                    # McKay message-passed node energies
+            n_cu * 3 +             # curl Hopf S² coords (scaled by norm)
+            n_cu                   # curl norms (Poincaré warped)
+        )
 
         xavier = math.sqrt(2.0 / (self.n_features + output_size))
         self.W_out = np.random.randn(output_size, self.n_features) * xavier
         self.b_out = np.zeros(output_size)
 
-    def _hopf_pipeline(self, coeffs_4d, L_rotors, R_rotors, phases, n_stages):
-        """Multi-stage Hopf on a 4D coefficient vector → geometric features."""
-        norm = np.linalg.norm(coeffs_4d)
-        q = coeffs_4d / norm if norm > 1e-10 else np.array([1., 0., 0., 0.])
-
-        s2_points = []
-        for stage in range(n_stages):
-            q_rot = qnormalize(qmul(qmul(L_rotors[stage], q), R_rotors[stage]))
-            p = hopf_project(q_rot)
-            s2_points.append(p)
-            if stage < n_stages - 1:
-                q = hopf_lift(p[0], p[1], p[2], phases[stage])
-
-        features = []
-        for p in s2_points:
-            features.extend(p.tolist())
-        for i in range(len(s2_points) - 1):
-            b, t = holonomy_triangle(s2_points[i].copy(),
-                                     s2_points[i+1].copy(), _NORTH.copy())
-            features.append(b)
-            features.append(t)
-
-        return np.array(features) * min(norm, 10.0)
-
     def _mckay_message_pass(self, node_energies):
         """
         Message passing on the extended E₈ Dynkin diagram.
-
         9 node energies propagate along 8 edges for K rounds.
-        Adjacent irreps exchange energy with learned coupling weights.
-        Poincaré warp after each round (the nonlinearity).
-
-        The E₈ topology constrains information flow:
-        node 4 (5D irrep, branching point) is the hub.
+        Poincaré warp after each round.
         """
         geo = _get_geo()
         e8_edges = geo["e8_edges"]
@@ -324,13 +287,12 @@ class HopfController:
                 w = self.mckay_couplings[rnd, edge_idx]
                 new_e[j] += energies[i] * w
                 new_e[i] += energies[j] * w
-            # Poincaré warp per node (scalar version)
             energies = np.array([poincare_warp_scalar(e) for e in new_e])
 
         return energies
 
     def forward(self, inputs):
-        """Forward pass: spectral decomposition → Hopf pipelines → McKay E₈ → readout."""
+        """Forward pass: spectral → per-eigenspace Hopf → McKay → readout."""
         geo = _get_geo()
         kernel = _get_pixel_kernel(self.input_size)
 
@@ -346,41 +308,274 @@ class HopfController:
         df = geo["d0"] @ f
         cu = [es["vectors"].T @ df for es in geo["curl_eigenspaces"]]
 
-        # --- E₁ Hopf pipeline (4D dipole = natural S³) ---
-        e1_feat = self._hopf_pipeline(sc[1], self.e1_L, self.e1_R,
-                                       self.e1_phases, self.N_HOPF_STAGES)
+        features = []
 
-        # --- C₁ chirality pipeline (first 4 of 6 curl coefficients) ---
-        c1_feat = self._hopf_pipeline(cu[0][:4], self.c1_L, self.c1_R,
-                                       self.c1_phases, self.N_C1_STAGES)
-        c1_remain = poincare_warp(cu[0][4:])
-        c1_feat = np.concatenate([c1_feat, c1_remain])
+        # --- Scalar eigenspaces ---
+        norms = []
+        for i, coeffs in enumerate(sc):
+            norm = np.linalg.norm(coeffs)
+            norms.append(norm)
 
-        # --- E₂ Givens rotation (applied before energy extraction) ---
-        sc[2] = apply_givens(sc[2], self.givens2, self.GIVENS_PAIRS_E2)
+            if self.sc_rotors[i] is not None:
+                # Hopf project first 4D with learned rotor
+                c4 = coeffs[:4]
+                n4 = np.linalg.norm(c4)
+                if n4 > 1e-10:
+                    q = c4 / n4
+                    q_rot = qnormalize(qmul(q, self.sc_rotors[i]))
+                    p = hopf_project(q_rot)
+                    scale = min(norm, 10.0)
+                    features.extend((p * scale).tolist())
+                else:
+                    features.extend([0.0, 0.0, 0.0])
+            else:
+                # dim < 4: Poincaré-warped scalar
+                features.append(poincare_warp_scalar(coeffs[0]))
 
-        # --- Irrep energies → E₈ nodes ---
-        # Map eigenspace norms onto the 9 nodes of the E₈ Dynkin diagram
+        # --- McKay message passing on eigenspace norms ---
         eigenspace_to_e8 = geo["eigenspace_to_e8"]
         node_energies = np.zeros(9)
-        for es_idx in range(len(sc)):
-            e8_node = eigenspace_to_e8[es_idx]
-            node_energies[e8_node] = np.linalg.norm(sc[es_idx])
-
-        # --- McKay message passing on E₈ ---
+        for i, norm in enumerate(norms):
+            node_energies[eigenspace_to_e8[i]] = norm
         mckay_out = self._mckay_message_pass(node_energies)
+        features.extend(mckay_out.tolist())
 
-        # --- Curl energies (Poincaré warped) ---
-        curl_energies = np.array([poincare_warp_scalar(np.linalg.norm(cu[i]))
-                                  for i in range(4)])
+        # --- Curl eigenspaces: Hopf projection + norm ---
+        for i, coeffs in enumerate(cu):
+            norm = np.linalg.norm(coeffs)
+            c4 = coeffs[:4]
+            n4 = np.linalg.norm(c4)
+            if n4 > 1e-10:
+                q = c4 / n4
+                q_rot = qnormalize(qmul(q, self.cu_rotors[i]))
+                p = hopf_project(q_rot)
+                scale = min(norm, 10.0)
+                features.extend((p * scale).tolist())
+            else:
+                features.extend([0.0, 0.0, 0.0])
+            features.append(poincare_warp_scalar(norm))
 
-        # --- Concatenate all geometric features ---
-        features = np.concatenate([
-            mckay_out,      # 9 (E₈ node energies after message passing)
-            curl_energies,  # 4
-            e1_feat,        # 13 (Hopf S² coords + Berry + transport)
-            c1_feat,        # 10 (chirality Hopf + remaining)
-        ])  # total: 36
+        features = np.array(features)
+        logits = self.W_out @ features + self.b_out
+        return logits.tolist()
+
+    def select_action(self, signals, signal_order):
+        inputs = [signals.get(k, 0.0) for k in signal_order]
+        logits = self.forward(inputs)
+        return logits.index(max(logits))
+
+    def mutate(self, rate=0.1, scale=0.3):
+        # Geometric params: full mutation scale
+        for i in range(len(self.sc_rotors)):
+            if self.sc_rotors[i] is not None:
+                self.sc_rotors[i] = mutate_quat(self.sc_rotors[i], rate, scale)
+        for i in range(len(self.cu_rotors)):
+            self.cu_rotors[i] = mutate_quat(self.cu_rotors[i], rate, scale)
+        for rnd in range(self.N_MCKAY_ROUNDS):
+            for e in range(8):
+                self.mckay_couplings[rnd, e] = mutate_scale(
+                    self.mckay_couplings[rnd, e], rate, scale)
+        # Readout: half scale to preserve learned structure
+        mutate_flat_2d(self.W_out, rate, scale * 0.5)
+        mutate_flat(self.b_out, rate, scale * 0.5)
+
+    def crossover(self, other):
+        """Uniform crossover: randomly pick params from self or other."""
+        child = self.clone()
+        for i in range(len(child.sc_rotors)):
+            if child.sc_rotors[i] is not None and random.random() < 0.5:
+                child.sc_rotors[i] = other.sc_rotors[i].copy()
+        for i in range(len(child.cu_rotors)):
+            if random.random() < 0.5:
+                child.cu_rotors[i] = other.cu_rotors[i].copy()
+        mask = np.random.random(child.mckay_couplings.shape) < 0.5
+        child.mckay_couplings[mask] = other.mckay_couplings[mask]
+        mask = np.random.random(child.W_out.shape) < 0.5
+        child.W_out[mask] = other.W_out[mask]
+        mask = np.random.random(child.b_out.shape) < 0.5
+        child.b_out[mask] = other.b_out[mask]
+        return child
+
+    def clone(self):
+        c = HopfController.__new__(HopfController)
+        c.input_size = self.input_size
+        c.hidden_size = self.hidden_size
+        c.output_size = self.output_size
+        c.N_MCKAY_ROUNDS = self.N_MCKAY_ROUNDS
+        c.n_features = self.n_features
+        c.sc_rotors = [q.copy() if q is not None else None
+                       for q in self.sc_rotors]
+        c.cu_rotors = [q.copy() for q in self.cu_rotors]
+        c.mckay_couplings = self.mckay_couplings.copy()
+        c.W_out = self.W_out.copy()
+        c.b_out = self.b_out.copy()
+        return c
+
+    def to_flat(self):
+        """Flatten all parameters to a single vector for ES optimization."""
+        parts = []
+        for r in self.sc_rotors:
+            if r is not None:
+                parts.append(r)
+        for r in self.cu_rotors:
+            parts.append(r)
+        parts.append(self.mckay_couplings.ravel())
+        parts.append(self.W_out.ravel())
+        parts.append(self.b_out)
+        return np.concatenate(parts)
+
+    def from_flat(self, flat):
+        """Load parameters from a flat vector. Normalizes rotors to S³."""
+        idx = 0
+        for i in range(len(self.sc_rotors)):
+            if self.sc_rotors[i] is not None:
+                self.sc_rotors[i] = qnormalize(flat[idx:idx+4].copy())
+                idx += 4
+        for i in range(len(self.cu_rotors)):
+            self.cu_rotors[i] = qnormalize(flat[idx:idx+4].copy())
+            idx += 4
+        n_mc = self.mckay_couplings.size
+        self.mckay_couplings = flat[idx:idx+n_mc].reshape(
+            self.mckay_couplings.shape).copy()
+        idx += n_mc
+        n_w = self.W_out.size
+        self.W_out = flat[idx:idx+n_w].reshape(self.W_out.shape).copy()
+        idx += n_w
+        self.b_out = flat[idx:idx+self.b_out.size].copy()
+
+    def param_count(self):
+        n_sc = sum(4 for r in self.sc_rotors if r is not None)
+        n_cu = len(self.cu_rotors) * 4
+        return (
+            n_sc + n_cu +
+            self.mckay_couplings.size +
+            self.W_out.size +
+            self.b_out.size
+        )
+
+    def effective_dof(self):
+        # Rotors on S³ have 3 DOF each
+        n_sc = sum(3 for r in self.sc_rotors if r is not None)
+        n_cu = len(self.cu_rotors) * 3
+        return (
+            n_sc + n_cu +
+            self.mckay_couplings.size +
+            self.W_out.size +
+            self.b_out.size
+        )
+
+    def to_dict(self):
+        return {
+            "type": "hopf", "version": 6,
+            "input_size": self.input_size,
+            "hidden_size": self.hidden_size,
+            "output_size": self.output_size,
+            "n_mckay_rounds": self.N_MCKAY_ROUNDS,
+            "sc_rotors": [q.tolist() if q is not None else None
+                          for q in self.sc_rotors],
+            "cu_rotors": [q.tolist() for q in self.cu_rotors],
+            "mckay_couplings": self.mckay_couplings.tolist(),
+            "W_out": self.W_out.tolist(),
+            "b_out": self.b_out.tolist(),
+        }
+
+    @classmethod
+    def from_dict(cls, d):
+        version = d.get("version", 5)
+        if version < 6:
+            raise ValueError(
+                f"Cannot load v{version} checkpoint into v6 controller. "
+                f"Architecture changed: per-eigenspace Hopf projections."
+            )
+        c = cls.__new__(cls)
+        c.input_size = d["input_size"]
+        c.hidden_size = d.get("hidden_size", 16)
+        c.output_size = d["output_size"]
+        c.N_MCKAY_ROUNDS = d.get("n_mckay_rounds", 3)
+        c.sc_rotors = [np.array(q) if q is not None else None
+                       for q in d["sc_rotors"]]
+        c.cu_rotors = [np.array(q) for q in d["cu_rotors"]]
+        c.mckay_couplings = np.array(d["mckay_couplings"], dtype=np.float64)
+        c.W_out = np.array(d["W_out"], dtype=np.float64)
+        c.b_out = np.array(d["b_out"], dtype=np.float64)
+        # Recompute n_features
+        n_sc_hopf = sum(1 for r in c.sc_rotors if r is not None)
+        n_sc_scalar = sum(1 for r in c.sc_rotors if r is None)
+        n_cu = len(c.cu_rotors)
+        c.n_features = n_sc_scalar + n_sc_hopf * 3 + 9 + n_cu * 3 + n_cu
+        return c
+
+
+# ================================================================
+# VertexHopfController v7 — Full Vertex Activations + Hopf Hidden Layer
+# ================================================================
+
+class VertexHopfController:
+    """
+    v7: Uses ALL 120 vertex activations through a Hopf hidden layer.
+
+    Diagnostic showed: optimal linear on 120 vertex activations = 76%.
+    v5/v6 threw away info compressing to 36/50 features, capping at ~59%.
+
+    v7: No compression. All 120 vertex activations are grouped into
+    30 × 4D, each processed by a learned rotor + Hopf projection.
+    This gives 30 × 4 = 120 features (3 S² + 1 magnitude per group).
+    Linear readout classifies from these 120 nonlinear features.
+
+    The Hopf projection is a quadratic nonlinearity — each unit extracts
+    a specific orientation-dependent feature from its 4D vertex group.
+    30 different rotors = 30 different quadratic feature detectors.
+
+    ~1330 params (still 38x fewer than MLP baseline).
+    """
+
+    N_GROUPS = 30  # 120 vertices / 4 = 30 groups
+
+    def __init__(self, input_size=784, hidden_size=16, output_size=10):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+
+        _get_geo()
+        _get_pixel_kernel(input_size)
+
+        # 30 right-rotors for Hopf hidden layer
+        self.rotors = [random_unit_quat() for _ in range(self.N_GROUPS)]
+
+        # Features: 30 × (3 S² + 1 magnitude) = 120
+        self.n_features = self.N_GROUPS * 4
+
+        xavier = math.sqrt(2.0 / (self.n_features + output_size))
+        self.W_out = np.random.randn(output_size, self.n_features) * xavier
+        self.b_out = np.zeros(output_size)
+
+    def forward(self, inputs):
+        kernel = _get_pixel_kernel(self.input_size)
+        x = np.asarray(inputs, dtype=np.float64)
+        if len(x) < self.input_size:
+            x = np.pad(x, (0, self.input_size - len(x)))
+        x = x[:self.input_size]
+
+        f = x @ kernel  # (120,)
+
+        features = np.empty(self.n_features)
+        for g in range(self.N_GROUPS):
+            c4 = f[g*4:(g+1)*4]
+            mag = np.linalg.norm(c4)
+            base = g * 4
+            if mag > 1e-10:
+                q = c4 / mag
+                q_rot = qnormalize(qmul(q, self.rotors[g]))
+                p = hopf_project(q_rot)
+                scale = min(mag, 10.0)
+                features[base] = p[0] * scale
+                features[base+1] = p[1] * scale
+                features[base+2] = p[2] * scale
+            else:
+                features[base] = 0.0
+                features[base+1] = 0.0
+                features[base+2] = 0.0
+            features[base+3] = poincare_warp_scalar(mag)
 
         logits = self.W_out @ features + self.b_out
         return logits.tolist()
@@ -391,88 +586,64 @@ class HopfController:
         return logits.index(max(logits))
 
     def mutate(self, rate=0.1, scale=0.3):
-        for i in range(self.N_HOPF_STAGES):
-            self.e1_L[i] = mutate_quat(self.e1_L[i], rate, scale)
-            self.e1_R[i] = mutate_quat(self.e1_R[i], rate, scale)
-        for i in range(len(self.e1_phases)):
-            self.e1_phases[i] = mutate_angle(self.e1_phases[i], rate, scale)
-        for i in range(self.N_C1_STAGES):
-            self.c1_L[i] = mutate_quat(self.c1_L[i], rate, scale)
-            self.c1_R[i] = mutate_quat(self.c1_R[i], rate, scale)
-        for i in range(len(self.c1_phases)):
-            self.c1_phases[i] = mutate_angle(self.c1_phases[i], rate, scale)
-        self.givens2 = [mutate_angle(a, rate, scale) for a in self.givens2]
-        # McKay couplings: scale-relative mutation
-        for rnd in range(self.N_MCKAY_ROUNDS):
-            for e in range(8):
-                self.mckay_couplings[rnd, e] = mutate_scale(
-                    self.mckay_couplings[rnd, e], rate, scale)
-        mutate_flat_2d(self.W_out, rate, scale)
-        mutate_flat(self.b_out, rate, scale)
+        for i in range(self.N_GROUPS):
+            self.rotors[i] = mutate_quat(self.rotors[i], rate, scale)
+        mutate_flat_2d(self.W_out, rate, scale * 0.5)
+        mutate_flat(self.b_out, rate, scale * 0.5)
+
+    def crossover(self, other):
+        child = self.clone()
+        for i in range(self.N_GROUPS):
+            if random.random() < 0.5:
+                child.rotors[i] = other.rotors[i].copy()
+        mask = np.random.random(child.W_out.shape) < 0.5
+        child.W_out[mask] = other.W_out[mask]
+        mask = np.random.random(child.b_out.shape) < 0.5
+        child.b_out[mask] = other.b_out[mask]
+        return child
 
     def clone(self):
-        c = HopfController.__new__(HopfController)
+        c = VertexHopfController.__new__(VertexHopfController)
         c.input_size = self.input_size
         c.hidden_size = self.hidden_size
         c.output_size = self.output_size
-        c.N_HOPF_STAGES = self.N_HOPF_STAGES
-        c.N_C1_STAGES = self.N_C1_STAGES
-        c.N_MCKAY_ROUNDS = self.N_MCKAY_ROUNDS
-        c.GIVENS_PAIRS_E2 = self.GIVENS_PAIRS_E2
+        c.N_GROUPS = self.N_GROUPS
         c.n_features = self.n_features
-        c.e1_L = [q.copy() for q in self.e1_L]
-        c.e1_R = [q.copy() for q in self.e1_R]
-        c.e1_phases = self.e1_phases[:]
-        c.c1_L = [q.copy() for q in self.c1_L]
-        c.c1_R = [q.copy() for q in self.c1_R]
-        c.c1_phases = self.c1_phases[:]
-        c.givens2 = self.givens2[:]
-        c.mckay_couplings = self.mckay_couplings.copy()
+        c.rotors = [q.copy() for q in self.rotors]
         c.W_out = self.W_out.copy()
         c.b_out = self.b_out.copy()
         return c
 
+    def to_flat(self):
+        parts = [r for r in self.rotors]
+        parts.append(self.W_out.ravel())
+        parts.append(self.b_out)
+        return np.concatenate(parts)
+
+    def from_flat(self, flat):
+        idx = 0
+        for i in range(self.N_GROUPS):
+            self.rotors[i] = qnormalize(flat[idx:idx+4].copy())
+            idx += 4
+        n_w = self.W_out.size
+        self.W_out = flat[idx:idx+n_w].reshape(self.W_out.shape).copy()
+        idx += n_w
+        self.b_out = flat[idx:idx+self.b_out.size].copy()
+
     def param_count(self):
-        return (
-            2 * self.N_HOPF_STAGES * 4 +      # E₁ rotors
-            (self.N_HOPF_STAGES - 1) +          # E₁ phases
-            2 * self.N_C1_STAGES * 4 +          # C₁ rotors
-            (self.N_C1_STAGES - 1) +            # C₁ phases
-            len(self.givens2) +                 # E₂ Givens
-            self.mckay_couplings.size +         # McKay couplings
-            self.W_out.size +                   # readout
-            self.b_out.size
-        )
+        return self.N_GROUPS * 4 + self.W_out.size + self.b_out.size
 
     def effective_dof(self):
-        return (
-            2 * self.N_HOPF_STAGES * 3 +       # rotors: 3 DOF each on S³
-            (self.N_HOPF_STAGES - 1) +
-            2 * self.N_C1_STAGES * 3 +
-            (self.N_C1_STAGES - 1) +
-            len(self.givens2) +
-            self.mckay_couplings.size +
-            self.W_out.size +
-            self.b_out.size
-        )
+        return self.N_GROUPS * 3 + self.W_out.size + self.b_out.size
 
     def to_dict(self):
         return {
-            "type": "hopf", "version": 5,
+            "type": "hopf", "version": 7,
             "input_size": self.input_size,
             "hidden_size": self.hidden_size,
             "output_size": self.output_size,
-            "n_hopf_stages": self.N_HOPF_STAGES,
-            "n_c1_stages": self.N_C1_STAGES,
-            "n_mckay_rounds": self.N_MCKAY_ROUNDS,
-            "e1_L": [q.tolist() for q in self.e1_L],
-            "e1_R": [q.tolist() for q in self.e1_R],
-            "e1_phases": self.e1_phases,
-            "c1_L": [q.tolist() for q in self.c1_L],
-            "c1_R": [q.tolist() for q in self.c1_R],
-            "c1_phases": self.c1_phases,
-            "givens2": self.givens2,
-            "mckay_couplings": self.mckay_couplings.tolist(),
+            "n_groups": self.N_GROUPS,
+            "rotors": [q.tolist() for q in self.rotors],
             "W_out": self.W_out.tolist(),
             "b_out": self.b_out.tolist(),
         }
@@ -483,19 +654,9 @@ class HopfController:
         c.input_size = d["input_size"]
         c.hidden_size = d.get("hidden_size", 16)
         c.output_size = d["output_size"]
-        c.N_HOPF_STAGES = d.get("n_hopf_stages", 3)
-        c.N_C1_STAGES = d.get("n_c1_stages", 2)
-        c.N_MCKAY_ROUNDS = d.get("n_mckay_rounds", 3)
-        c.GIVENS_PAIRS_E2 = [(0, 1), (2, 3), (4, 5), (6, 7)]
-        c.n_features = 36
-        c.e1_L = [np.array(q) for q in d["e1_L"]]
-        c.e1_R = [np.array(q) for q in d["e1_R"]]
-        c.e1_phases = d["e1_phases"]
-        c.c1_L = [np.array(q) for q in d.get("c1_L", [[1,0,0,0]]*c.N_C1_STAGES)]
-        c.c1_R = [np.array(q) for q in d.get("c1_R", [[1,0,0,0]]*c.N_C1_STAGES)]
-        c.c1_phases = d.get("c1_phases", [0.0]*(c.N_C1_STAGES - 1))
-        c.givens2 = d["givens2"]
-        c.mckay_couplings = np.array(d["mckay_couplings"], dtype=np.float64)
+        c.N_GROUPS = d.get("n_groups", 30)
+        c.n_features = c.N_GROUPS * 4
+        c.rotors = [np.array(q) for q in d["rotors"]]
         c.W_out = np.array(d["W_out"], dtype=np.float64)
         c.b_out = np.array(d["b_out"], dtype=np.float64)
         return c
