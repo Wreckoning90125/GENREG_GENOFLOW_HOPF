@@ -663,6 +663,218 @@ class VertexHopfController:
 
 
 # ================================================================
+# ADEHopfController v8 — ADE-Structured Spectral Hopf
+# ================================================================
+
+class ADEHopfController:
+    """
+    v8: ADE-structured feature extraction with principled nonlinearities.
+
+    Key improvements over v7:
+    - Eigenspace decomposition respects ADE structure (not arbitrary 4-tuples)
+    - Irrep copy decomposition via group orbit method
+    - Hopf projection ONLY on spin-1/2 eigenspaces (E1, E8) where exact
+    - CG cross products (character projector to V_1) for real-type irreps
+    - Hopf on 4-tuples for eigenspaces without CG (practical nonlinearity)
+    - E8 Dynkin edge features (norm products/ratios)
+
+    Zero non-convex parameters: all features are fixed geometric functions
+    of the input. Only the linear readout is learned (via ridge regression).
+    """
+
+    def __init__(self, input_size=784, hidden_size=16, output_size=10):
+        from ade_geometry import get_ade
+        self.input_size = input_size
+        self.output_size = output_size
+
+        ade = get_ade()
+        _get_pixel_kernel(input_size)
+
+        # Count features
+        self.n_features = self._count_features(ade)
+
+        xavier = math.sqrt(2.0 / (self.n_features + output_size))
+        self.W_out = np.random.randn(output_size, self.n_features) * xavier
+        self.b_out = np.zeros(output_size)
+
+    @staticmethod
+    def _count_features(ade):
+        n = 0
+        for idx, aes in enumerate(ade["ade_eigenspaces"]):
+            d = aes["d"]
+            d2 = aes["d2"]
+            copies = aes["copies"]
+            cg = aes["cg_v1"]
+
+            if d == 1:
+                n += 1
+            elif d == 2:
+                # Hopf on full 4D: 3 S2 + 1 mag
+                n += 4
+            else:
+                # Copy magnitudes
+                n += len(copies)
+                # CG cross products (all pairs)
+                if cg is not None:
+                    n_pairs = len(copies) * (len(copies) - 1) // 2
+                    n += n_pairs * cg.shape[0]
+                else:
+                    # Fallback: Hopf on 4-tuples of eigenspace coefficients
+                    n_hopf = d2 // 4
+                    n_leftover = d2 % 4
+                    n += n_hopf * 4 + n_leftover
+
+        # E8 edge features
+        n += len(ade["e8_edges"]) * 2
+        return n
+
+    def extract_features(self, inputs):
+        """Extract the full feature vector from raw pixel inputs."""
+        from ade_geometry import get_ade
+        ade = get_ade()
+        kernel = _get_pixel_kernel(self.input_size)
+
+        x = np.asarray(inputs, dtype=np.float64)
+        if len(x) < self.input_size:
+            x = np.pad(x, (0, self.input_size - len(x)))
+        x = x[:self.input_size]
+
+        f = x @ kernel  # (120,) vertex activations
+
+        features = []
+        es_norms = []
+
+        for idx, aes in enumerate(ade["ade_eigenspaces"]):
+            V = aes["V"]
+            d = aes["d"]
+            d2 = aes["d2"]
+            copies = aes["copies"]
+            cg = aes["cg_v1"]
+
+            # Project to eigenspace
+            coeffs = V.T @ f  # (d2,)
+            es_norms.append(np.linalg.norm(coeffs))
+
+            if d == 1:
+                features.append(poincare_warp_scalar(coeffs[0]))
+
+            elif d == 2:
+                # Hopf on full 4D eigenspace (exact for spin-1/2)
+                q = coeffs
+                mag = np.linalg.norm(q)
+                if mag > 1e-10:
+                    p = hopf_project(q / mag)
+                    scale = min(mag, 10.0)
+                    features.extend((p * scale).tolist())
+                else:
+                    features.extend([0.0, 0.0, 0.0])
+                features.append(poincare_warp_scalar(mag))
+
+            else:
+                # Decompose into copies
+                copy_vecs = [cb.T @ coeffs for cb in copies]
+
+                # Copy magnitudes
+                for v in copy_vecs:
+                    features.append(poincare_warp_scalar(np.linalg.norm(v)))
+
+                if cg is not None:
+                    # CG cross products: all pairs -> V_1 projection
+                    nc = len(copy_vecs)
+                    for a in range(nc):
+                        for b in range(a + 1, nc):
+                            kron_ab = np.kron(copy_vecs[a], copy_vecs[b])
+                            w = cg @ kron_ab
+                            features.extend(w.tolist())
+                else:
+                    # No CG: Hopf on 4-tuples of eigenspace coeffs
+                    n_hopf = d2 // 4
+                    for g in range(n_hopf):
+                        c4 = coeffs[g*4:(g+1)*4]
+                        mag = np.linalg.norm(c4)
+                        if mag > 1e-10:
+                            p = hopf_project(c4 / mag)
+                            scale = min(mag, 10.0)
+                            features.extend((p * scale).tolist())
+                        else:
+                            features.extend([0.0, 0.0, 0.0])
+                        features.append(poincare_warp_scalar(mag))
+                    # Leftover coefficients
+                    leftover = d2 % 4
+                    if leftover > 0:
+                        for k in range(leftover):
+                            features.append(
+                                poincare_warp_scalar(coeffs[n_hopf*4 + k]))
+
+        # E8 edge features: norm products and asymmetry
+        e8_edges = ade["e8_edges"]
+        e8_to_es = ade["e8_to_eigenspace"]
+        for ni, nj in e8_edges:
+            ei = e8_to_es[ni]
+            ej = e8_to_es[nj]
+            ni_val = es_norms[ei]
+            nj_val = es_norms[ej]
+            features.append(poincare_warp_scalar(ni_val * nj_val))
+            features.append(poincare_warp_scalar(
+                ni_val / (nj_val + 1e-6) - nj_val / (ni_val + 1e-6)))
+
+        return np.array(features)
+
+    def forward(self, inputs):
+        features = self.extract_features(inputs)
+        logits = self.W_out @ features + self.b_out
+        return logits.tolist()
+
+    def select_action(self, signals, signal_order):
+        inputs = [signals.get(k, 0.0) for k in signal_order]
+        logits = self.forward(inputs)
+        return logits.index(max(logits))
+
+    def to_flat(self):
+        return np.concatenate([self.W_out.ravel(), self.b_out])
+
+    def from_flat(self, flat):
+        n_w = self.W_out.size
+        self.W_out = flat[:n_w].reshape(self.W_out.shape).copy()
+        self.b_out = flat[n_w:n_w + self.b_out.size].copy()
+
+    def param_count(self):
+        return self.W_out.size + self.b_out.size
+
+    def effective_dof(self):
+        return self.param_count()
+
+    def clone(self):
+        c = ADEHopfController.__new__(ADEHopfController)
+        c.input_size = self.input_size
+        c.output_size = self.output_size
+        c.n_features = self.n_features
+        c.W_out = self.W_out.copy()
+        c.b_out = self.b_out.copy()
+        return c
+
+    def to_dict(self):
+        return {
+            "type": "hopf", "version": 8,
+            "input_size": self.input_size,
+            "output_size": self.output_size,
+            "n_features": self.n_features,
+            "W_out": self.W_out.tolist(),
+            "b_out": self.b_out.tolist(),
+        }
+
+    @classmethod
+    def from_dict(cls, d):
+        c = cls.__new__(cls)
+        c.input_size = d["input_size"]
+        c.output_size = d["output_size"]
+        c.n_features = d["n_features"]
+        c.W_out = np.array(d["W_out"], dtype=np.float64)
+        c.b_out = np.array(d["b_out"], dtype=np.float64)
+        return c
+
+
+# ================================================================
 # Clifford verification (import-time)
 # ================================================================
 
