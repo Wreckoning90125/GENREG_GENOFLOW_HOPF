@@ -197,10 +197,13 @@ def _build_pixel_kernel(input_size, kappa=10.0):
     return (exp_s / exp_s.sum(axis=1, keepdims=True)).astype(np.float64)
 
 
-def _get_pixel_kernel(input_size):
-    global _PIXEL_KERNEL
-    if _PIXEL_KERNEL is None or _PIXEL_KERNEL.shape[0] != input_size:
-        _PIXEL_KERNEL = _build_pixel_kernel(input_size)
+_PIXEL_KAPPA = None
+
+def _get_pixel_kernel(input_size, kappa=10.0):
+    global _PIXEL_KERNEL, _PIXEL_KAPPA
+    if _PIXEL_KERNEL is None or _PIXEL_KERNEL.shape[0] != input_size or _PIXEL_KAPPA != kappa:
+        _PIXEL_KERNEL = _build_pixel_kernel(input_size, kappa)
+        _PIXEL_KAPPA = kappa
     return _PIXEL_KERNEL
 
 
@@ -724,8 +727,16 @@ class ADEHopfController:
                     n_leftover = d2 % 4
                     n += n_hopf * 4 + n_leftover
 
-        # E8 edge features
-        n += len(ade["e8_edges"]) * 2
+        # Curl eigenspace features (co-exact 1-forms, Theorem 5)
+        # Edge/differential reading: how signals flow through the net
+        for ces in ade.get("curl_eigenspaces", []):
+            mult = ces["multiplicity"]
+            n_hopf = mult // 4
+            n_leftover = mult % 4
+            n += n_hopf * 4 + n_leftover
+
+        # E8 edge features: 2 norm + 2 directional per edge
+        n += len(ade["e8_edges"]) * 4
         return n
 
     def extract_features(self, inputs):
@@ -743,6 +754,7 @@ class ADEHopfController:
 
         features = []
         es_norms = []
+        es_hopf_vecs = {}  # eigenspace index -> S2 vector for E8 interactions
 
         for idx, aes in enumerate(ade["ade_eigenspaces"]):
             V = aes["V"]
@@ -766,6 +778,7 @@ class ADEHopfController:
                     p = hopf_project(q / mag)
                     scale = min(mag, 10.0)
                     features.extend((p * scale).tolist())
+                    es_hopf_vecs[idx] = p  # store unit S2 vector
                 else:
                     features.extend([0.0, 0.0, 0.0])
                 features.append(poincare_warp_scalar(mag))
@@ -773,6 +786,13 @@ class ADEHopfController:
             else:
                 # Decompose into copies
                 copy_vecs = [cb.T @ coeffs for cb in copies]
+
+                # Store first copy direction as S2 representative
+                if len(copy_vecs[0]) >= 4:
+                    c4 = copy_vecs[0][:4]
+                    c4_mag = np.linalg.norm(c4)
+                    if c4_mag > 1e-10:
+                        es_hopf_vecs[idx] = hopf_project(c4 / c4_mag)
 
                 # Copy magnitudes
                 for v in copy_vecs:
@@ -806,7 +826,38 @@ class ADEHopfController:
                             features.append(
                                 poincare_warp_scalar(coeffs[n_hopf*4 + k]))
 
-        # E8 edge features: norm products and asymmetry
+        # --- Curl eigenspace features (edge/differential reading) ---
+        # Co-exact 1-forms (Theorem 5): how signals flow through the net.
+        # By Hodge orthogonality, d0@f is exact and ⊥ co-exact eigenspaces.
+        # Use multiplicative edge signal h_e = f_i * f_j to access curl modes:
+        # this quadratic interaction breaks the exact/co-exact barrier.
+        edge_list = ade["edges"]
+        h_mult = np.array([f[i] * f[j] for i, j in edge_list])
+
+        for ces in ade.get("curl_eigenspaces", []):
+            V_curl = ces["vectors"]        # (720, mult)
+            mult = ces["multiplicity"]
+            curl_coeffs = V_curl.T @ h_mult  # (mult,)
+
+            n_hopf = mult // 4
+            for g in range(n_hopf):
+                c4 = curl_coeffs[g*4:(g+1)*4]
+                mag = np.linalg.norm(c4)
+                if mag > 1e-10:
+                    p = hopf_project(c4 / mag)
+                    scale = min(mag, 10.0)
+                    features.extend((p * scale).tolist())
+                else:
+                    features.extend([0.0, 0.0, 0.0])
+                features.append(poincare_warp_scalar(mag))
+            leftover = mult % 4
+            if leftover > 0:
+                for k in range(leftover):
+                    features.append(
+                        poincare_warp_scalar(curl_coeffs[n_hopf*4 + k]))
+
+        # E8 edge features: norm interactions + directional interactions
+        # The E8 edges encode which irrep transitions are geometrically allowed
         e8_edges = ade["e8_edges"]
         e8_to_es = ade["e8_to_eigenspace"]
         for ni, nj in e8_edges:
@@ -814,9 +865,19 @@ class ADEHopfController:
             ej = e8_to_es[nj]
             ni_val = es_norms[ei]
             nj_val = es_norms[ej]
+            # Norm interactions
             features.append(poincare_warp_scalar(ni_val * nj_val))
             features.append(poincare_warp_scalar(
                 ni_val / (nj_val + 1e-6) - nj_val / (ni_val + 1e-6)))
+            # Directional interactions along lawful E8 transitions
+            if ei in es_hopf_vecs and ej in es_hopf_vecs:
+                hi = es_hopf_vecs[ei]
+                hj = es_hopf_vecs[ej]
+                features.append(np.dot(hi, hj))                     # alignment
+                features.append(np.linalg.norm(np.cross(hi, hj)))   # orthogonality
+            else:
+                features.append(0.0)
+                features.append(0.0)
 
         return np.array(features)
 
