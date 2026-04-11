@@ -1,0 +1,9 @@
+ADE Hopf v9 Ridge Regression Results
+  (v8 + curl eigenspace features + kappa sweep)
+Best kappa: 5.5
+Features: 293
+Parameters: 2940
+Best alpha: 0.0001
+Train accuracy: 0.9089
+Test accuracy: 0.9612
+Baseline (v8): 87.46% with 177 features

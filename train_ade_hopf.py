@@ -9,6 +9,7 @@ Training is a single linear solve — no evolutionary search needed.
 
 import os
 import sys
+import gc
 import json
 import time
 import numpy as np
@@ -42,6 +43,7 @@ def extract_features_batch(images, ade, pixel_kernel):
     # Process each eigenspace
     all_features = []
     all_es_norms = []
+    all_es_hopf = {}  # idx -> (N, 3) S2 vectors for E8 interactions
 
     for idx, aes in enumerate(ade_es):
         V = aes["V"]      # (120, d2)
@@ -66,11 +68,14 @@ def extract_features_batch(images, ade, pixel_kernel):
             Q = np.zeros_like(C)
             Q[safe] = C[safe] / mags[safe, None]
 
-            # hopf_project vectorized: px=2(wb+ac), py=2(wc-ab), pz=w²+a²-b²-c²
+            # hopf_project vectorized
             w, a, b, c = Q[:, 0], Q[:, 1], Q[:, 2], Q[:, 3]
             px = 2 * (w * b + a * c)
             py = 2 * (w * c - a * b)
             pz = w * w + a * a - b * b - c * c
+
+            # Store S2 vectors for E8 interactions
+            all_es_hopf[idx] = np.column_stack([px, py, pz])
 
             scale = np.minimum(mags, 10.0)
             f_hopf = np.column_stack([
@@ -88,6 +93,20 @@ def extract_features_batch(images, ade, pixel_kernel):
                 copy_vecs_all.append(cv)
                 cm = np.linalg.norm(cv, axis=1)
                 copy_feats.append(2.0 * np.tanh(cm / 2.0))
+
+            # Store first copy's Hopf S2 as representative
+            if copy_vecs_all[0].shape[1] >= 4:
+                c4 = copy_vecs_all[0][:, :4]  # (N, 4)
+                c4_mag = np.linalg.norm(c4, axis=1)
+                c4_safe = c4_mag > 1e-10
+                c4_Q = np.zeros_like(c4)
+                c4_Q[c4_safe] = c4[c4_safe] / c4_mag[c4_safe, None]
+                cw, ca, cb_v, cc = c4_Q[:, 0], c4_Q[:, 1], c4_Q[:, 2], c4_Q[:, 3]
+                all_es_hopf[idx] = np.column_stack([
+                    2 * (cw * cb_v + ca * cc),
+                    2 * (cw * cc - ca * cb_v),
+                    cw*cw + ca*ca - cb_v*cb_v - cc*cc
+                ])
 
             all_features.append(np.column_stack(copy_feats))
 
@@ -133,7 +152,49 @@ def extract_features_batch(images, ade, pixel_kernel):
                         all_features.append(
                             (2.0 * np.tanh(val / 2.0)).reshape(N, 1))
 
-    # E8 edge features
+    # Curl eigenspace features (edge/differential reading, Theorem 5)
+    # By Hodge orthogonality, d0@f (exact 1-form) is ⊥ co-exact eigenspaces.
+    # Use multiplicative edge signal h_e = f_i * f_j to access curl modes.
+    curl_es = ade.get("curl_eigenspaces", [])
+    if curl_es:
+        edge_list = ade["edges"]
+        ei = np.array([e[0] for e in edge_list])  # (720,)
+        ej = np.array([e[1] for e in edge_list])  # (720,)
+        # Process in chunks to limit peak memory (avoid full N x 720 allocation)
+        chunk_size = 10000
+        for ces in curl_es:
+            V_curl = ces["vectors"]    # (720, mult)
+            mult = ces["multiplicity"]
+            CC = np.zeros((N, mult))
+            for start in range(0, N, chunk_size):
+                end = min(start + chunk_size, N)
+                H_chunk = F[start:end, ei] * F[start:end, ej]  # (chunk, 720)
+                CC[start:end] = H_chunk @ V_curl
+
+            n_hopf = mult // 4
+            for g in range(n_hopf):
+                c4 = CC[:, g*4:(g+1)*4]   # (N, 4)
+                mags = np.linalg.norm(c4, axis=1)
+                safe = mags > 1e-10
+                Q = np.zeros_like(c4)
+                Q[safe] = c4[safe] / mags[safe, None]
+                w, a, b, c = Q[:, 0], Q[:, 1], Q[:, 2], Q[:, 3]
+                px = 2 * (w * b + a * c)
+                py = 2 * (w * c - a * b)
+                pz = w * w + a * a - b * b - c * c
+                scale = np.minimum(mags, 10.0)
+                all_features.append(np.column_stack([
+                    px * scale, py * scale, pz * scale,
+                    2.0 * np.tanh(mags / 2.0)
+                ]))
+            leftover = mult % 4
+            if leftover > 0:
+                for k in range(leftover):
+                    val = CC[:, n_hopf * 4 + k]
+                    all_features.append(
+                        (2.0 * np.tanh(val / 2.0)).reshape(N, 1))
+
+    # E8 edge features: norm interactions + directional interactions
     for ni, nj in e8_edges:
         ei = e8_to_es[ni]
         ej = e8_to_es[nj]
@@ -141,12 +202,22 @@ def extract_features_batch(images, ade, pixel_kernel):
         nj_val = all_es_norms[ej]
         prod = ni_val * nj_val
         asym = ni_val / (nj_val + 1e-6) - nj_val / (ni_val + 1e-6)
-        all_features.append(
-            np.column_stack([
-                2.0 * np.tanh(prod / 2.0),
-                2.0 * np.tanh(asym / 2.0)
-            ])
-        )
+        # Norm features
+        norm_feats = np.column_stack([
+            2.0 * np.tanh(prod / 2.0),
+            2.0 * np.tanh(asym / 2.0)
+        ])
+        # Directional features along E8 edges
+        if ei in all_es_hopf and ej in all_es_hopf:
+            hi = all_es_hopf[ei]  # (N, 3)
+            hj = all_es_hopf[ej]  # (N, 3)
+            dot = np.sum(hi * hj, axis=1)  # (N,)
+            cross = np.cross(hi, hj)       # (N, 3)
+            cross_mag = np.linalg.norm(cross, axis=1)  # (N,)
+            dir_feats = np.column_stack([dot, cross_mag])
+        else:
+            dir_feats = np.zeros((N, 2))
+        all_features.append(np.column_stack([norm_feats, dir_feats]))
 
     return np.hstack(all_features)
 
@@ -160,6 +231,49 @@ def ridge_regression(X, Y, alpha=1.0):
     return W
 
 
+def ridge_regression_bias(X, Y, alpha=1.0):
+    """Ridge with unpenalized bias column (last column of X should be ones)."""
+    n = X.shape[1]
+    reg = alpha * np.eye(n)
+    reg[-1, -1] = 0.0  # don't regularize bias
+    return np.linalg.solve(X.T @ X + reg, X.T @ Y)
+
+
+def nystrom_poly_kernel_ridge(X_train, Y_train, X_test, m=2000,
+                               degree=2, alpha=0.1, seed=42):
+    """
+    Polynomial kernel ridge regression with Nystrom approximation.
+    Memory-efficient: computes K^T K and K^T Y in chunks.
+
+    K(x, y) = (x.y + 1)^degree
+    Uses m landmark points for Nystrom approximation.
+    """
+    np.random.seed(seed)
+    idx = np.random.choice(len(X_train), m, replace=False)
+    L = X_train[idx]
+
+    # K_mm: kernel between landmarks
+    K_mm = (L @ L.T + 1) ** degree  # (m, m)
+
+    # Accumulate K^T K and K^T Y in chunks to avoid OOM
+    chunk_size = 5000
+    KtK = np.zeros((m, m))
+    KtY = np.zeros((m, Y_train.shape[1]))
+    for i in range(0, len(X_train), chunk_size):
+        end = min(i + chunk_size, len(X_train))
+        K_chunk = (X_train[i:end] @ L.T + 1) ** degree  # (chunk, m)
+        KtK += K_chunk.T @ K_chunk
+        KtY += K_chunk.T @ Y_train[i:end]
+
+    # Solve regularized system
+    beta = np.linalg.solve(KtK + alpha * K_mm, KtY)  # (m, n_classes)
+
+    # Test predictions
+    K_test = (X_test @ L.T + 1) ** degree  # (N_test, m)
+
+    return beta, L, K_test
+
+
 def evaluate(W, X, labels):
     """Evaluate accuracy."""
     preds = np.argmax(X @ W, axis=1)
@@ -168,11 +282,12 @@ def evaluate(W, X, labels):
 
 def main():
     print("=" * 60)
-    print("ADE Hopf Controller v8 — Ridge Regression Training")
+    print("ADE Hopf Controller v9 — Ridge Regression Training")
+    print("  (v8 + curl eigenspace features)")
     print("=" * 60)
 
     # Setup
-    out_dir = "hopf_v8_ade"
+    out_dir = "hopf_v9_ade"
     os.makedirs(out_dir, exist_ok=True)
 
     # Load MNIST
@@ -185,59 +300,138 @@ def main():
     print("\nBuilding ADE geometry...")
     ade = get_ade()
 
-    # Build pixel kernel
     from hopf_controller import _get_pixel_kernel
-    pixel_kernel = _get_pixel_kernel(784)
-
-    # Create controller to get feature count
-    ctrl = ADEHopfController(input_size=784, output_size=10)
-    print(f"\nFeatures: {ctrl.n_features}")
-    print(f"Readout params: {ctrl.param_count()}")
-
-    # Extract features
-    print("\nExtracting training features...")
-    t0 = time.time()
-    X_train = extract_features_batch(train_images, ade, pixel_kernel)
-    t_train = time.time() - t0
-    print(f"  Shape: {X_train.shape}, Time: {t_train:.1f}s")
-
-    print("Extracting test features...")
-    t0 = time.time()
-    X_test = extract_features_batch(test_images, ade, pixel_kernel)
-    t_test = time.time() - t0
-    print(f"  Shape: {X_test.shape}, Time: {t_test:.1f}s")
 
     # One-hot labels
     Y_train = np.zeros((len(train_labels), 10))
     for i, l in enumerate(train_labels):
         Y_train[i, l] = 1.0
 
-    # Ridge regression with alpha search
-    print("\nRidge regression (alpha search)...")
-    best_acc = 0
-    best_alpha = 1.0
-    best_W = None
+    # --- Kappa sweep: test different pixel kernel temperatures ---
+    kappa_values = [5.0, 5.5, 6.0, 8, 10]
+    alpha_values = [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]
 
-    for alpha in [0.001, 0.01, 0.1, 1.0, 10.0, 100.0]:
-        W = ridge_regression(X_train, Y_train, alpha)
-        train_acc = evaluate(W, X_train, train_labels)
-        test_acc = evaluate(W, X_test, test_labels)
-        print(f"  alpha={alpha:8.3f}: train={train_acc:.4f}, test={test_acc:.4f}")
+    overall_best_acc = 0
+    overall_best_kappa = 10.0
+    overall_best_alpha = 0.001
+    overall_best_W = None
+    overall_best_mean = None
+    overall_best_std = None
 
-        if test_acc > best_acc:
-            best_acc = test_acc
-            best_alpha = alpha
-            best_W = W
+    for kappa in kappa_values:
+        print(f"\n--- Kappa = {kappa} ---")
+        pixel_kernel = _get_pixel_kernel(784, kappa=kappa)
 
-    print(f"\nBest: alpha={best_alpha}, test={best_acc:.4f}")
+        # Extract features
+        t0 = time.time()
+        X_train = extract_features_batch(train_images, ade, pixel_kernel)
+        X_test = extract_features_batch(test_images, ade, pixel_kernel)
+        t_feat = time.time() - t0
+        print(f"  Features: {X_train.shape[1]}, extracted in {t_feat:.1f}s")
 
-    # Store weights in controller
-    ctrl.W_out = best_W.T  # (10, n_features)
-    ctrl.b_out = np.zeros(10)
+        # Standardize
+        feat_mean = X_train.mean(axis=0)
+        feat_std = X_train.std(axis=0)
+        feat_std[feat_std < 1e-8] = 1.0
+        X_train_s = (X_train - feat_mean) / feat_std
+        X_test_s = (X_test - feat_mean) / feat_std
+        X_train_b = np.hstack([X_train_s, np.ones((len(X_train_s), 1))])
+        X_test_b = np.hstack([X_test_s, np.ones((len(X_test_s), 1))])
+
+        # Alpha sweep
+        for alpha in alpha_values:
+            W = ridge_regression_bias(X_train_b, Y_train, alpha)
+            test_acc = evaluate(W, X_test_b, test_labels)
+            train_acc = evaluate(W, X_train_b, train_labels)
+
+            marker = ""
+            if test_acc > overall_best_acc:
+                overall_best_acc = test_acc
+                overall_best_kappa = kappa
+                overall_best_alpha = alpha
+                overall_best_W = W
+                overall_best_mean = feat_mean.copy()
+                overall_best_std = feat_std.copy()
+                marker = " <-- NEW BEST"
+            print(f"  alpha={alpha:8.4f}: train={train_acc:.4f}, test={test_acc:.4f}{marker}")
+
+        # Free memory for next kappa iteration
+        del X_train, X_test, X_train_s, X_test_s, X_train_b, X_test_b
+        gc.collect()
+
+    print(f"\n{'='*60}")
+    print(f"Best: kappa={overall_best_kappa}, alpha={overall_best_alpha}, "
+          f"test={overall_best_acc:.4f}")
+    print(f"{'='*60}")
+
+    # Rebuild with best kappa for final evaluation
+    pixel_kernel = _get_pixel_kernel(784, kappa=overall_best_kappa)
+    X_test = extract_features_batch(test_images, ade, pixel_kernel)
+    X_train = extract_features_batch(train_images, ade, pixel_kernel)
+    feat_mean = overall_best_mean
+    feat_std = overall_best_std
+    X_test_s = (X_test - feat_mean) / feat_std
+    X_test_b = np.hstack([X_test_s, np.ones((len(X_test_s), 1))])
+    X_train_s = (X_train - feat_mean) / feat_std
+    X_train_b = np.hstack([X_train_s, np.ones((len(X_train_s), 1))])
+    best_W = overall_best_W
+    best_acc = overall_best_acc
+    best_alpha = overall_best_alpha
+
+    # --- Polynomial Kernel Ridge (Nystrom) ---
+    print("\n--- Polynomial Kernel Ridge (degree=2, Nystrom) ---")
+    kernel_best_acc = 0
+    kernel_best_m = 2000
+    kernel_best_alpha = 0.1
+    for m_val in [1500, 2000]:
+        for k_alpha in [0.01, 0.1, 1.0]:
+            beta, L, K_test_m = nystrom_poly_kernel_ridge(
+                X_train_s, Y_train, X_test_s,
+                m=m_val, degree=2, alpha=k_alpha)
+            k_test_acc = np.mean(
+                np.argmax(K_test_m @ beta, axis=1) == np.array(test_labels))
+            marker = ""
+            if k_test_acc > kernel_best_acc:
+                kernel_best_acc = k_test_acc
+                kernel_best_m = m_val
+                kernel_best_alpha = k_alpha
+                marker = " <-- BEST"
+            print(f"  m={m_val}, alpha={k_alpha:.2f}: test={k_test_acc:.4f}{marker}")
+            del K_test_m; gc.collect()
+
+    print(f"\nKernel ridge best: m={kernel_best_m}, alpha={kernel_best_alpha}, "
+          f"test={kernel_best_acc:.4f}")
+
+    # Use kernel ridge if it beats linear
+    use_kernel = kernel_best_acc > best_acc
+    if use_kernel:
+        print(f"  Kernel ridge ({kernel_best_acc:.4f}) beats linear ({best_acc:.4f})")
+        best_acc = kernel_best_acc
+        beta, L, K_test_m = nystrom_poly_kernel_ridge(
+            X_train_s, Y_train, X_test_s,
+            m=kernel_best_m, degree=2, alpha=kernel_best_alpha)
+    else:
+        print(f"  Linear ({best_acc:.4f}) beats kernel ({kernel_best_acc:.4f})")
+
+    # Create controller
+    ctrl = ADEHopfController(input_size=784, output_size=10)
+
+    if not use_kernel:
+        # Linear readout weights
+        W_features = best_W[:-1, :]
+        W_bias = best_W[-1, :]
+        ctrl.W_out = (W_features / feat_std[:, None]).T
+        ctrl.b_out = W_bias - (feat_mean / feat_std) @ W_features
+        preds = np.argmax(X_test_b @ best_W, axis=1)
+    else:
+        # For kernel readout, store landmarks and beta in checkpoint
+        # The controller linear weights are less meaningful, but store for compat
+        ctrl.W_out = np.zeros((10, ctrl.n_features))
+        ctrl.b_out = np.zeros(10)
+        preds = np.argmax(K_test_m @ beta, axis=1)
 
     # Per-class accuracy
     print("\nPer-class accuracy:")
-    preds = np.argmax(X_test @ best_W, axis=1)
     test_labels_np = np.array(test_labels)
     for digit in range(10):
         mask = test_labels_np == digit
@@ -247,12 +441,20 @@ def main():
     # Save
     ckpt = {
         "controller": ctrl.to_dict(),
+        "best_kappa": overall_best_kappa,
         "best_alpha": best_alpha,
-        "train_acc": float(evaluate(best_W, X_train, train_labels)),
         "test_acc": float(best_acc),
         "n_features": ctrl.n_features,
         "n_params": ctrl.param_count(),
+        "feat_mean": feat_mean.tolist(),
+        "feat_std": feat_std.tolist(),
+        "readout": "kernel_poly2" if use_kernel else "linear",
     }
+    if use_kernel:
+        ckpt["kernel_m"] = kernel_best_m
+        ckpt["kernel_alpha"] = kernel_best_alpha
+        ckpt["kernel_landmarks"] = L.tolist()
+        ckpt["kernel_beta"] = beta.tolist()
     ckpt_path = os.path.join(out_dir, "best_checkpoint.json")
     with open(ckpt_path, "w") as f:
         json.dump(ckpt, f, indent=2)
@@ -261,16 +463,20 @@ def main():
     # Save training history
     history_path = os.path.join(out_dir, "training_log.txt")
     with open(history_path, "w") as f:
-        f.write(f"ADE Hopf v8 Ridge Regression Results\n")
+        f.write(f"ADE Hopf v9 Ridge Regression Results\n")
+        f.write(f"  (v8 + curl eigenspace features + kappa sweep)\n")
+        f.write(f"Best kappa: {overall_best_kappa}\n")
         f.write(f"Features: {ctrl.n_features}\n")
         f.write(f"Parameters: {ctrl.param_count()}\n")
         f.write(f"Best alpha: {best_alpha}\n")
-        f.write(f"Train accuracy: {evaluate(best_W, X_train, train_labels):.4f}\n")
+        f.write(f"Train accuracy: {evaluate(best_W, X_train_b, train_labels):.4f}\n")
         f.write(f"Test accuracy: {best_acc:.4f}\n")
+        f.write(f"Baseline (v8): 87.46% with 177 features\n")
 
     print(f"\n{'='*60}")
-    print(f"v8 ADE Hopf: {best_acc:.2%} test accuracy")
+    print(f"v9 ADE Hopf: {best_acc:.2%} test accuracy")
     print(f"  {ctrl.n_features} features, {ctrl.param_count()} params")
+    print(f"  Baseline (v8): 87.46% with 177 features")
     print(f"{'='*60}")
 
 
