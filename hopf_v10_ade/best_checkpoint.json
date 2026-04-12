@@ -1,0 +1,17 @@
+{
+  "version": 10,
+  "kappa_set": [
+    3.0,
+    5.5,
+    8.0
+  ],
+  "n_features_per_scale": 293,
+  "n_features_total": 879,
+  "test_acc": 0.9739,
+  "linear_test_acc": 0.9495,
+  "kernel_test_acc": 0.9739,
+  "readout": "kernel_poly2",
+  "kernel_m": 5000,
+  "kernel_alpha": 0.01,
+  "kernel_degree": 2
+}

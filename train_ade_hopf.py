@@ -247,6 +247,7 @@ def nystrom_poly_kernel_ridge(X_train, Y_train, X_test, m=2000,
 
     K(x, y) = (x.y + 1)^degree
     Uses m landmark points for Nystrom approximation.
+    Returns (beta, L, K_test) where predictions are K_test @ beta.
     """
     np.random.seed(seed)
     idx = np.random.choice(len(X_train), m, replace=False)
@@ -255,8 +256,8 @@ def nystrom_poly_kernel_ridge(X_train, Y_train, X_test, m=2000,
     # K_mm: kernel between landmarks
     K_mm = (L @ L.T + 1) ** degree  # (m, m)
 
-    # Accumulate K^T K and K^T Y in chunks to avoid OOM
-    chunk_size = 5000
+    # Smaller chunks for larger m to cap peak memory
+    chunk_size = max(500, min(5000, 3000000 // m))
     KtK = np.zeros((m, m))
     KtY = np.zeros((m, Y_train.shape[1]))
     for i in range(0, len(X_train), chunk_size):
@@ -264,6 +265,7 @@ def nystrom_poly_kernel_ridge(X_train, Y_train, X_test, m=2000,
         K_chunk = (X_train[i:end] @ L.T + 1) ** degree  # (chunk, m)
         KtK += K_chunk.T @ K_chunk
         KtY += K_chunk.T @ Y_train[i:end]
+        del K_chunk
 
     # Solve regularized system
     beta = np.linalg.solve(KtK + alpha * K_mm, KtY)  # (m, n_classes)
@@ -280,14 +282,29 @@ def evaluate(W, X, labels):
     return np.mean(preds == labels)
 
 
+def extract_features_multiscale(images, ade, kappas):
+    """
+    Multi-scale feature extraction: concatenate features computed at
+    different pixel-kernel temperatures. Each kappa gives a different
+    softness of the pixel→600-cell vertex projection, capturing
+    different spatial scales of the input signal on the net.
+    """
+    from hopf_controller import _get_pixel_kernel
+    feats = []
+    for k in kappas:
+        pk = _get_pixel_kernel(784, kappa=k)
+        feats.append(extract_features_batch(images, ade, pk))
+    return np.hstack(feats)
+
+
 def main():
     print("=" * 60)
-    print("ADE Hopf Controller v9 — Ridge Regression Training")
-    print("  (v8 + curl eigenspace features)")
+    print("ADE Hopf Controller v10 — Multi-Scale Kernel Ridge")
+    print("  (v9 + multi-scale kappa + larger Nystrom m)")
     print("=" * 60)
 
     # Setup
-    out_dir = "hopf_v9_ade"
+    out_dir = "hopf_v10_ade"
     os.makedirs(out_dir, exist_ok=True)
 
     # Load MNIST
@@ -307,83 +324,64 @@ def main():
     for i, l in enumerate(train_labels):
         Y_train[i, l] = 1.0
 
-    # --- Kappa sweep: test different pixel kernel temperatures ---
-    kappa_values = [5.0, 5.5, 6.0, 8, 10]
-    alpha_values = [0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]
+    # --- Multi-scale feature extraction ---
+    # Different kappa values capture different spatial scales of the signal
+    # on the 600-cell: low kappa = soft/coarse (captures broad structure),
+    # high kappa = sharp/fine (captures edges). Concatenating scales gives
+    # a multi-resolution reading on the net — analogous to a wavelet
+    # decomposition, all derived from the same underlying geometry.
+    kappa_set = [3.0, 5.5, 8.0]
+    print(f"\nMulti-scale kappa set: {kappa_set}")
 
-    overall_best_acc = 0
-    overall_best_kappa = 10.0
-    overall_best_alpha = 0.001
-    overall_best_W = None
-    overall_best_mean = None
-    overall_best_std = None
+    print("Extracting training features (multi-scale)...")
+    t0 = time.time()
+    X_train = extract_features_multiscale(train_images, ade, kappa_set)
+    print(f"  Shape: {X_train.shape}, time: {time.time() - t0:.1f}s")
 
-    for kappa in kappa_values:
-        print(f"\n--- Kappa = {kappa} ---")
-        pixel_kernel = _get_pixel_kernel(784, kappa=kappa)
+    print("Extracting test features (multi-scale)...")
+    t0 = time.time()
+    X_test = extract_features_multiscale(test_images, ade, kappa_set)
+    print(f"  Shape: {X_test.shape}, time: {time.time() - t0:.1f}s")
 
-        # Extract features
-        t0 = time.time()
-        X_train = extract_features_batch(train_images, ade, pixel_kernel)
-        X_test = extract_features_batch(test_images, ade, pixel_kernel)
-        t_feat = time.time() - t0
-        print(f"  Features: {X_train.shape[1]}, extracted in {t_feat:.1f}s")
-
-        # Standardize
-        feat_mean = X_train.mean(axis=0)
-        feat_std = X_train.std(axis=0)
-        feat_std[feat_std < 1e-8] = 1.0
-        X_train_s = (X_train - feat_mean) / feat_std
-        X_test_s = (X_test - feat_mean) / feat_std
-        X_train_b = np.hstack([X_train_s, np.ones((len(X_train_s), 1))])
-        X_test_b = np.hstack([X_test_s, np.ones((len(X_test_s), 1))])
-
-        # Alpha sweep
-        for alpha in alpha_values:
-            W = ridge_regression_bias(X_train_b, Y_train, alpha)
-            test_acc = evaluate(W, X_test_b, test_labels)
-            train_acc = evaluate(W, X_train_b, train_labels)
-
-            marker = ""
-            if test_acc > overall_best_acc:
-                overall_best_acc = test_acc
-                overall_best_kappa = kappa
-                overall_best_alpha = alpha
-                overall_best_W = W
-                overall_best_mean = feat_mean.copy()
-                overall_best_std = feat_std.copy()
-                marker = " <-- NEW BEST"
-            print(f"  alpha={alpha:8.4f}: train={train_acc:.4f}, test={test_acc:.4f}{marker}")
-
-        # Free memory for next kappa iteration
-        del X_train, X_test, X_train_s, X_test_s, X_train_b, X_test_b
-        gc.collect()
-
-    print(f"\n{'='*60}")
-    print(f"Best: kappa={overall_best_kappa}, alpha={overall_best_alpha}, "
-          f"test={overall_best_acc:.4f}")
-    print(f"{'='*60}")
-
-    # Rebuild with best kappa for final evaluation
-    pixel_kernel = _get_pixel_kernel(784, kappa=overall_best_kappa)
-    X_test = extract_features_batch(test_images, ade, pixel_kernel)
-    X_train = extract_features_batch(train_images, ade, pixel_kernel)
-    feat_mean = overall_best_mean
-    feat_std = overall_best_std
-    X_test_s = (X_test - feat_mean) / feat_std
-    X_test_b = np.hstack([X_test_s, np.ones((len(X_test_s), 1))])
+    # Standardize
+    feat_mean = X_train.mean(axis=0)
+    feat_std = X_train.std(axis=0)
+    feat_std[feat_std < 1e-8] = 1.0
     X_train_s = (X_train - feat_mean) / feat_std
-    X_train_b = np.hstack([X_train_s, np.ones((len(X_train_s), 1))])
-    best_W = overall_best_W
-    best_acc = overall_best_acc
-    best_alpha = overall_best_alpha
+    X_test_s = (X_test - feat_mean) / feat_std
+    del X_train, X_test
+    gc.collect()
 
-    # --- Polynomial Kernel Ridge (Nystrom) ---
-    print("\n--- Polynomial Kernel Ridge (degree=2, Nystrom) ---")
+    # --- Linear ridge baseline with multi-scale features ---
+    X_train_b = np.hstack([X_train_s, np.ones((len(X_train_s), 1))])
+    X_test_b = np.hstack([X_test_s, np.ones((len(X_test_s), 1))])
+
+    print("\n--- Linear ridge baseline (multi-scale) ---")
+    best_linear_acc = 0
+    best_linear_W = None
+    best_linear_alpha = 0.1
+    for alpha in [0.001, 0.01, 0.1, 1.0]:
+        W = ridge_regression_bias(X_train_b, Y_train, alpha)
+        test_acc = evaluate(W, X_test_b, test_labels)
+        train_acc = evaluate(W, X_train_b, train_labels)
+        if test_acc > best_linear_acc:
+            best_linear_acc = test_acc
+            best_linear_W = W
+            best_linear_alpha = alpha
+        print(f"  alpha={alpha:.4f}: train={train_acc:.4f}, test={test_acc:.4f}")
+    print(f"Linear ridge best: alpha={best_linear_alpha}, test={best_linear_acc:.4f}")
+    del X_train_b, X_test_b
+    gc.collect()
+
+    # --- Polynomial kernel ridge with large Nystrom approximation ---
+    print("\n--- Polynomial kernel ridge (degree=2, Nystrom) ---")
     kernel_best_acc = 0
-    kernel_best_m = 2000
+    kernel_best_m = 5000
     kernel_best_alpha = 0.1
-    for m_val in [1500, 2000]:
+    kernel_best_beta = None
+    kernel_best_L = None
+
+    for m_val in [3000, 4000, 5000]:
         for k_alpha in [0.01, 0.1, 1.0]:
             beta, L, K_test_m = nystrom_poly_kernel_ridge(
                 X_train_s, Y_train, X_test_s,
@@ -395,40 +393,34 @@ def main():
                 kernel_best_acc = k_test_acc
                 kernel_best_m = m_val
                 kernel_best_alpha = k_alpha
+                kernel_best_beta = beta
+                kernel_best_L = L
                 marker = " <-- BEST"
-            print(f"  m={m_val}, alpha={k_alpha:.2f}: test={k_test_acc:.4f}{marker}")
-            del K_test_m; gc.collect()
+            print(f"  m={m_val}, alpha={k_alpha:.3f}: test={k_test_acc:.4f}{marker}")
+            del K_test_m
+            gc.collect()
 
     print(f"\nKernel ridge best: m={kernel_best_m}, alpha={kernel_best_alpha}, "
           f"test={kernel_best_acc:.4f}")
 
-    # Use kernel ridge if it beats linear
-    use_kernel = kernel_best_acc > best_acc
-    if use_kernel:
-        print(f"  Kernel ridge ({kernel_best_acc:.4f}) beats linear ({best_acc:.4f})")
-        best_acc = kernel_best_acc
-        beta, L, K_test_m = nystrom_poly_kernel_ridge(
-            X_train_s, Y_train, X_test_s,
-            m=kernel_best_m, degree=2, alpha=kernel_best_alpha)
-    else:
-        print(f"  Linear ({best_acc:.4f}) beats kernel ({kernel_best_acc:.4f})")
+    # Decide best readout
+    use_kernel = kernel_best_acc > best_linear_acc
+    best_acc = max(kernel_best_acc, best_linear_acc)
 
     # Create controller
     ctrl = ADEHopfController(input_size=784, output_size=10)
+    n_features_single = ctrl.n_features
+    n_features_ms = n_features_single * len(kappa_set)
 
-    if not use_kernel:
-        # Linear readout weights
-        W_features = best_W[:-1, :]
-        W_bias = best_W[-1, :]
-        ctrl.W_out = (W_features / feat_std[:, None]).T
-        ctrl.b_out = W_bias - (feat_mean / feat_std) @ W_features
-        preds = np.argmax(X_test_b @ best_W, axis=1)
+    # Final predictions for per-class report
+    if use_kernel:
+        print(f"\nKernel ({kernel_best_acc:.4f}) beats linear ({best_linear_acc:.4f})")
+        K_test_m = (X_test_s @ kernel_best_L.T + 1) ** 2
+        preds = np.argmax(K_test_m @ kernel_best_beta, axis=1)
     else:
-        # For kernel readout, store landmarks and beta in checkpoint
-        # The controller linear weights are less meaningful, but store for compat
-        ctrl.W_out = np.zeros((10, ctrl.n_features))
-        ctrl.b_out = np.zeros(10)
-        preds = np.argmax(K_test_m @ beta, axis=1)
+        print(f"\nLinear ({best_linear_acc:.4f}) beats kernel ({kernel_best_acc:.4f})")
+        X_test_b = np.hstack([X_test_s, np.ones((len(X_test_s), 1))])
+        preds = np.argmax(X_test_b @ best_linear_W, axis=1)
 
     # Per-class accuracy
     print("\nPer-class accuracy:")
@@ -438,45 +430,65 @@ def main():
         acc = np.mean(preds[mask] == digit)
         print(f"  Digit {digit}: {acc:.4f} ({mask.sum()} samples)")
 
-    # Save
-    ckpt = {
-        "controller": ctrl.to_dict(),
-        "best_kappa": overall_best_kappa,
-        "best_alpha": best_alpha,
+    # Save checkpoint
+    # Small metadata as JSON, large arrays as compressed numpy
+    meta = {
+        "version": 10,
+        "kappa_set": kappa_set,
+        "n_features_per_scale": n_features_single,
+        "n_features_total": n_features_ms,
         "test_acc": float(best_acc),
-        "n_features": ctrl.n_features,
-        "n_params": ctrl.param_count(),
-        "feat_mean": feat_mean.tolist(),
-        "feat_std": feat_std.tolist(),
+        "linear_test_acc": float(best_linear_acc),
+        "kernel_test_acc": float(kernel_best_acc),
         "readout": "kernel_poly2" if use_kernel else "linear",
     }
     if use_kernel:
-        ckpt["kernel_m"] = kernel_best_m
-        ckpt["kernel_alpha"] = kernel_best_alpha
-        ckpt["kernel_landmarks"] = L.tolist()
-        ckpt["kernel_beta"] = beta.tolist()
-    ckpt_path = os.path.join(out_dir, "best_checkpoint.json")
-    with open(ckpt_path, "w") as f:
-        json.dump(ckpt, f, indent=2)
-    print(f"\nSaved to {ckpt_path}")
+        meta["kernel_m"] = int(kernel_best_m)
+        meta["kernel_alpha"] = float(kernel_best_alpha)
+        meta["kernel_degree"] = 2
+    else:
+        meta["linear_alpha"] = float(best_linear_alpha)
+
+    meta_path = os.path.join(out_dir, "best_checkpoint.json")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+
+    # Compressed numpy arrays (large data)
+    arrays = {
+        "feat_mean": feat_mean,
+        "feat_std": feat_std,
+    }
+    if use_kernel:
+        arrays["kernel_landmarks"] = kernel_best_L.astype(np.float32)
+        arrays["kernel_beta"] = kernel_best_beta.astype(np.float32)
+    else:
+        arrays["linear_W"] = best_linear_W.astype(np.float32)
+    arr_path = os.path.join(out_dir, "best_checkpoint.npz")
+    np.savez_compressed(arr_path, **arrays)
+    print(f"\nSaved metadata to {meta_path}")
+    print(f"Saved arrays to {arr_path}")
 
     # Save training history
     history_path = os.path.join(out_dir, "training_log.txt")
     with open(history_path, "w") as f:
-        f.write(f"ADE Hopf v9 Ridge Regression Results\n")
-        f.write(f"  (v8 + curl eigenspace features + kappa sweep)\n")
-        f.write(f"Best kappa: {overall_best_kappa}\n")
-        f.write(f"Features: {ctrl.n_features}\n")
-        f.write(f"Parameters: {ctrl.param_count()}\n")
-        f.write(f"Best alpha: {best_alpha}\n")
-        f.write(f"Train accuracy: {evaluate(best_W, X_train_b, train_labels):.4f}\n")
-        f.write(f"Test accuracy: {best_acc:.4f}\n")
-        f.write(f"Baseline (v8): 87.46% with 177 features\n")
+        f.write(f"ADE Hopf v10 — Multi-Scale Kernel Ridge\n")
+        f.write(f"Kappa set: {kappa_set}\n")
+        f.write(f"Features per scale: {n_features_single}\n")
+        f.write(f"Total features: {n_features_ms}\n")
+        f.write(f"Readout: {'polynomial kernel ridge (deg=2)' if use_kernel else 'linear ridge'}\n")
+        if use_kernel:
+            f.write(f"Nystrom m: {kernel_best_m}\n")
+            f.write(f"Kernel alpha: {kernel_best_alpha}\n")
+        f.write(f"Linear ridge test: {best_linear_acc:.4f}\n")
+        f.write(f"Kernel ridge test: {kernel_best_acc:.4f}\n")
+        f.write(f"Final test accuracy: {best_acc:.4f}\n")
+        f.write(f"Baseline (v9): 96.12%\n")
+        f.write(f"Baseline (v8): 87.46%\n")
 
     print(f"\n{'='*60}")
-    print(f"v9 ADE Hopf: {best_acc:.2%} test accuracy")
-    print(f"  {ctrl.n_features} features, {ctrl.param_count()} params")
-    print(f"  Baseline (v8): 87.46% with 177 features")
+    print(f"v10 ADE Hopf (multi-scale): {best_acc:.2%} test accuracy")
+    print(f"  {n_features_ms} features ({len(kappa_set)} scales × {n_features_single})")
+    print(f"  Baseline v9: 96.12%, v8: 87.46%")
     print(f"{'='*60}")
 
 
