@@ -312,6 +312,74 @@ def compute_coexact_laplacian(d1):
     return d1.T @ d1
 
 
+# ================================================================
+# Step 1c: Tetrahedra and the Ω³ layer (v12)
+# ================================================================
+
+def find_tetrahedra(adjacency, triangles):
+    """
+    Find all tetrahedral cells (4-cliques) of the 600-cell graph.
+
+    For each triangle (i, j, k) with i<j<k, look for every vertex
+    l > k adjacent to all three. Each such l gives a tetrahedral
+    cell (i, j, k, l). The 600-cell polytope should have exactly
+    600 such cells.
+    """
+    n = adjacency.shape[0]
+    tetrahedra = []
+    for (i, j, k) in triangles:
+        for l in range(k + 1, n):
+            if (adjacency[i, l] > 0 and adjacency[j, l] > 0
+                    and adjacency[k, l] > 0):
+                tetrahedra.append((i, j, k, l))
+    return tetrahedra
+
+
+def build_cell_boundary(triangles, tetrahedra):
+    """
+    Build the 3-form boundary operator d₂: Ω² → Ω³.
+
+    For an oriented tetrahedron (v0, v1, v2, v3) with v0 < v1 < v2 < v3,
+    its signed boundary is the alternating sum of the four triangular
+    faces obtained by removing one vertex:
+
+        ∂(v0,v1,v2,v3) = +(v1,v2,v3) − (v0,v2,v3) + (v0,v1,v3) − (v0,v1,v2)
+
+    The returned matrix has one row per tetrahedron and one column per
+    triangle. The coefficient is the sign of the corresponding face in
+    the alternating sum.
+
+    The matrix is shaped (n_cells, n_triangles) so that d₂ acts on
+    2-forms (column vectors of length n_triangles) producing 3-forms
+    of length n_cells. Composition with d₁ (n_triangles × n_edges)
+    gives d₂ ∘ d₁ = 0, which is verified downstream.
+    """
+    triangle_index = {}
+    for t_idx, (i, j, k) in enumerate(triangles):
+        triangle_index[(i, j, k)] = t_idx
+
+    n_cells = len(tetrahedra)
+    n_triangles = len(triangles)
+    d2 = np.zeros((n_cells, n_triangles), dtype=np.float64)
+
+    for c_idx, (v0, v1, v2, v3) in enumerate(tetrahedra):
+        # remove v0: +(v1, v2, v3)
+        d2[c_idx, triangle_index[(v1, v2, v3)]] += 1.0
+        # remove v1: -(v0, v2, v3)
+        d2[c_idx, triangle_index[(v0, v2, v3)]] -= 1.0
+        # remove v2: +(v0, v1, v3)
+        d2[c_idx, triangle_index[(v0, v1, v3)]] += 1.0
+        # remove v3: -(v0, v1, v2)
+        d2[c_idx, triangle_index[(v0, v1, v2)]] -= 1.0
+
+    return d2
+
+
+def compute_cell_laplacian(d2):
+    """L₃ = d₂ d₂ᵀ — the 3-form Hodge Laplacian acting on cell functions."""
+    return d2 @ d2.T
+
+
 def verify_theorem5(eigenspace_groups):
     """
     Verify Theorem 5: co-exact 1-form multiplicities start with [6, 16, 30, 48].
@@ -536,6 +604,110 @@ def get_geometry():
     print(f"    Face eigenspaces: {[fe['multiplicity'] for fe in face_eigenspaces]} "
           f"(total {total_face} 2-form modes)")
     print(f"    Berry phase range: [{tri_berry.min():.4f}, {tri_berry.max():.4f}] rad")
+
+    # -------------------------------------------------------
+    # v12: Ω³ — cells (tetrahedra) via d₂ and the full Hodge ladder
+    #
+    # The 600-cell polytope has 600 tetrahedral cells. Each cell is
+    # a 4-clique in the adjacency graph; enumerate them and build d₂,
+    # the signed triangle→cell boundary operator. Then:
+    #
+    #   L₃ = d₂ d₂ᵀ      (3-form Hodge Laplacian, (600, 600))
+    #   L₂_coex = d₂ᵀ d₂ (co-exact part of the 2-form Laplacian)
+    #
+    # By Poincaré duality on S³, H³(S³) is 1-dimensional (the constant
+    # volume form). So L₃ has a single zero eigenvalue and 599 non-zero
+    # cell modes which decompose under 2I into its irreps. Intertwining
+    # gives the co-exact 2-form eigenspaces for free via d₂ᵀ applied
+    # to cell eigenvectors.
+    #
+    # Verifies d₂ ∘ d₁ = 0 (boundary of boundary is zero) — the final
+    # consistency check of the full de Rham chain complex on the 600-
+    # cell.
+    # -------------------------------------------------------
+    print("  Building Ω³ (cell) layer via d₂ and tetrahedra...")
+    tetrahedra = find_tetrahedra(adj, triangles)
+    assert len(tetrahedra) == 600, \
+        f"Expected 600 tetrahedra, found {len(tetrahedra)}"
+    print(f"    Tetrahedra: {len(tetrahedra)}")
+
+    d2 = build_cell_boundary(triangles, tetrahedra)
+    print(f"    d₂ shape: {d2.shape}")
+
+    # Verify d₂ ∘ d₁ = 0 (chain complex property)
+    d2_d1 = d2 @ d1_face
+    d2_d1_err = np.abs(d2_d1).max()
+    print(f"    d₂ ∘ d₁ = 0 check: max |d₂·d₁| = {d2_d1_err:.2e}")
+    assert d2_d1_err < 1e-10, "Chain complex d₂∘d₁=0 fails"
+
+    L3 = compute_cell_laplacian(d2)
+    cell_evals, cell_evecs = compute_eigenbasis(L3)
+    # Use a tighter tolerance than the default 0.1 — the L₃ spectrum
+    # has some near-neighbor eigenvalues (e.g. 6.696 vs 6.791) that
+    # the default grouping merges, introducing ~1e-3 error in the
+    # eigenvector identity. tol=0.005 keeps them separate.
+    cell_groups = group_eigenspaces(cell_evals, cell_evecs, tol=0.005)
+
+    nonzero_cell = [(lam, vecs) for lam, vecs in cell_groups if lam > 1e-6]
+    print(f"    Cell eigenspaces (non-zero): "
+          f"{[g[1].shape[1] for g in nonzero_cell]} "
+          f"(total {sum(g[1].shape[1] for g in nonzero_cell)} "
+          f"out of {len(tetrahedra)} cells, 1 harmonic)")
+
+    cell_eigenspaces = []
+    for lam, vecs in nonzero_cell:
+        cell_eigenspaces.append({
+            "eigenvalue": float(lam),
+            "vectors": vecs,               # (n_cells, mult)
+            "multiplicity": int(vecs.shape[1]),
+        })
+
+    # Co-exact 2-form eigenspaces via intertwining: d₂ᵀ maps L₃ eigs
+    # to L₂_coex eigs with the same eigenvalue. Orthonormalize since
+    # |d₂ᵀ w|² = λ|w|² when L₃ w = λ w.
+    coexact_face_eigenspaces = []
+    for ces in cell_eigenspaces:
+        V_cell = ces["vectors"]            # (n_cells, mult)
+        V_cf_raw = d2.T @ V_cell           # (n_triangles, mult)
+        Q, _ = np.linalg.qr(V_cf_raw)
+        coexact_face_eigenspaces.append({
+            "eigenvalue": ces["eigenvalue"],
+            "vectors": Q,                  # (n_triangles, mult)
+            "multiplicity": int(Q.shape[1]),
+        })
+
+    # Signed cell chirality: the 3D volume (/6) of the tetrahedron
+    # formed by the four Hopf-projected vertex S² points. This is the
+    # Ω³ analog of the triangle Berry phase — a chirality-carrying
+    # scalar per cell that flips sign under orientation reversal.
+    tet_arr = np.array(tetrahedra, dtype=np.int64)
+    p0 = vertex_hopf[tet_arr[:, 0]]
+    p1 = vertex_hopf[tet_arr[:, 1]]
+    p2 = vertex_hopf[tet_arr[:, 2]]
+    p3 = vertex_hopf[tet_arr[:, 3]]
+    # det([p1-p0, p2-p0, p3-p0]) / 6   (scalar triple product / 6)
+    A = p1 - p0
+    B = p2 - p0
+    C = p3 - p0
+    cell_chirality = np.einsum("ci,ci->c", A, np.cross(B, C)) / 6.0  # (n_cells,)
+
+    _CACHE["d2"] = d2
+    _CACHE["tetrahedra"] = tetrahedra
+    _CACHE["tetrahedra_indices"] = tet_arr
+    _CACHE["cell_chirality"] = cell_chirality
+    _CACHE["cell_eigenspaces"] = cell_eigenspaces
+    _CACHE["coexact_face_eigenspaces"] = coexact_face_eigenspaces
+
+    total_cell = sum(c["multiplicity"] for c in cell_eigenspaces)
+    print(f"    Cell chirality range: [{cell_chirality.min():+.4e}, "
+          f"{cell_chirality.max():+.4e}]")
+    chi_pos = int((cell_chirality > 1e-9).sum())
+    chi_neg = int((cell_chirality < -1e-9).sum())
+    chi_zero = int((np.abs(cell_chirality) <= 1e-9).sum())
+    print(f"    Cell chirality sign split: +{chi_pos}, -{chi_neg}, "
+          f"0: {chi_zero}")
+    print(f"    Cell eigenspaces (non-harmonic): {len(cell_eigenspaces)} "
+          f"groups, total {total_cell} 3-form modes")
 
     print("[cell600] Geometry construction complete.")
     return _CACHE

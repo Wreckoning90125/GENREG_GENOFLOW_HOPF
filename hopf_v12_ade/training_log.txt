@@ -1,0 +1,6 @@
+v12 — Full Hodge ladder (v10 + v11 face + v12 coex + cell)
+Kappa set: [3.0, 5.5, 8.0]
+Total features: 1611
+Best kernel: m=4000, alpha=0.01
+Test accuracy: 0.9724
+Baselines: v10 97.39%, v11 97.32%

@@ -1,0 +1,97 @@
+{
+  "kappa_set": [
+    3.0,
+    5.5,
+    8.0
+  ],
+  "berry_phase_verified": true,
+  "experiments": [
+    {
+      "experiment": "full-MNIST hflip detection",
+      "train_digits": null,
+      "test_digits": null,
+      "train_size": 40000,
+      "test_size": 10000,
+      "v10_linear_acc": 0.9811,
+      "v10_kernel_acc": 0.9908,
+      "v10_kernel_params": {
+        "m": 3000,
+        "alpha": 0.01
+      },
+      "face_linear_acc": 0.9692,
+      "face_kernel_acc": 0.9857,
+      "face_kernel_params": {
+        "m": 1500,
+        "alpha": 0.1
+      },
+      "face_minus_v10_kernel": -0.005099999999999993,
+      "face_minus_v10_linear": -0.011900000000000022
+    },
+    {
+      "experiment": "cross-digit hflip (train:0-4, test:5-9)",
+      "train_digits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "test_digits": [
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "train_size": 40000,
+      "test_size": 9722,
+      "v10_linear_acc": 0.9165809504217239,
+      "v10_kernel_acc": 0.9025920592470685,
+      "v10_kernel_params": {
+        "m": 3000,
+        "alpha": 0.01
+      },
+      "face_linear_acc": 0.9310841390660358,
+      "face_kernel_acc": 0.9287183707056161,
+      "face_kernel_params": {
+        "m": 1500,
+        "alpha": 1.0
+      },
+      "face_minus_v10_kernel": 0.026126311458547602,
+      "face_minus_v10_linear": 0.014503188644311882
+    },
+    {
+      "experiment": "cross-digit hflip (train:5-9, test:0-4)",
+      "train_digits": [
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "test_digits": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "train_size": 40000,
+      "test_size": 10000,
+      "v10_linear_acc": 0.8723,
+      "v10_kernel_acc": 0.9015,
+      "v10_kernel_params": {
+        "m": 2000,
+        "alpha": 0.01
+      },
+      "face_linear_acc": 0.927,
+      "face_kernel_acc": 0.9353,
+      "face_kernel_params": {
+        "m": 1500,
+        "alpha": 1.0
+      },
+      "face_minus_v10_kernel": 0.03380000000000005,
+      "face_minus_v10_linear": 0.05470000000000008
+    }
+  ]
+}
