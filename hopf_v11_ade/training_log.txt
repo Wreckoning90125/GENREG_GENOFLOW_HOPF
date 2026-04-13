@@ -1,0 +1,14 @@
+ADE Hopf v11 — Face/Holonomy (Ω²) Reading
+Kappa set: [3.0, 5.5, 8.0]
+Features per scale: 393
+Total features: 1179
+Readout: polynomial kernel ridge (deg=2)
+Nystrom m: 5000
+Kernel alpha: 0.1
+Linear ridge test: 0.9498
+Kernel ridge test: 0.9732
+Final test accuracy: 0.9732
+Berry phase Cl(3,0) verified: True
+Baseline (v10): 97.39%
+Baseline (v9):  96.12%
+Baseline (v8):  87.46%

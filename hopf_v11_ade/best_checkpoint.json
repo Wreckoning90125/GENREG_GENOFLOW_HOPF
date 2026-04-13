@@ -1,0 +1,19 @@
+{
+  "version": 11,
+  "kappa_set": [
+    3.0,
+    5.5,
+    8.0
+  ],
+  "n_features_per_scale": 393,
+  "n_features_total": 1179,
+  "test_acc": 0.9732,
+  "linear_test_acc": 0.9498,
+  "kernel_test_acc": 0.9732,
+  "readout": "kernel_poly2",
+  "berry_phase_verified": true,
+  "berry_phase_err": 4.440892098500626e-16,
+  "kernel_m": 5000,
+  "kernel_alpha": 0.1,
+  "kernel_degree": 2
+}

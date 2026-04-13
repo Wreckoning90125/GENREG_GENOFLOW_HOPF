@@ -1,0 +1,21 @@
+{
+  "version": "11-ensemble",
+  "kappa_set": [
+    3.0,
+    5.5,
+    8.0
+  ],
+  "v10_params": {
+    "m": 5000,
+    "alpha": 0.01
+  },
+  "face_params": {
+    "m": 2000,
+    "alpha": 0.1
+  },
+  "v10_test_acc": 0.9739,
+  "face_test_acc": 0.8931,
+  "best_ensemble_w": 0.0,
+  "best_ensemble_test_acc": 0.9739,
+  "berry_phase_verified": true
+}

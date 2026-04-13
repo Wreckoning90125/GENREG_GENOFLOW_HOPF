@@ -959,3 +959,142 @@ try:
     _n_verified = verify_geometric_ops(20)
 except ImportError:
     _n_verified = 0
+
+
+# ================================================================
+# v11: Cl(3,0) rotor-composition Berry phase for triangle holonomy
+#
+# For a closed triangular loop (p_a, p_b, p_c) on S², parallel transport
+# of a tangent frame around the loop picks up a rotation whose angle
+# equals the signed solid angle of the spherical triangle
+# (Hannay/Berry theorem; the Hopf bundle has curvature 2-form equal to
+# twice the S² area form, so the holonomy integral is the solid angle).
+#
+# We implement this via actual Cl(3,0) rotor composition:
+#   R_pq = cos(θ/2) + sin(θ/2) B̂_pq
+# where θ = arccos(p·q) and B̂_pq is the unit bivector dual to
+# (p × q)/|p × q|. Composing R_ca · R_bc · R_ab yields a rotor whose
+# axis is parallel to p_a (the base point of the loop) and whose
+# rotation angle is the Berry phase — extractable from the dot product
+# of the bivector part with the bivector dual of p_a.
+#
+# This is genuinely Clifford-algebraic: rotor composition in the
+# even subalgebra Cl(3,0)⁺ (which IS the quaternion algebra via
+# {1, e12, e13, e23}), using qmul for the geometric product.
+# ================================================================
+
+# Convention (matching hopf_project):
+#   rotor [w, a, b, c] = w + a·e12 + b·e13 + c·e23
+#   axis-to-bivector map: axis (nx, ny, nz) ↔ (nz, -ny, nx)
+#   (so that axis e3 ↔ bivector e12, consistent with rotation of e3
+#    by rotor sandwich R e3 ~R being the identity when R is a
+#    rotation around e3)
+
+
+def rotor_from_axis_angle(axis, angle):
+    """Build a rotor for rotation by `angle` around unit `axis` in Cl(3,0)."""
+    w = math.cos(angle / 2.0)
+    s = math.sin(angle / 2.0)
+    return np.array([w, s * axis[2], -s * axis[1], s * axis[0]])
+
+
+def rotor_transport(p, q):
+    """
+    Cl(3,0) rotor for parallel transport from S² point p to q
+    along the shortest geodesic.
+
+    Returns [w, a, b, c] such that applying R v ~R rotates any vector
+    v by the geodesic angle between p and q about the axis (p × q).
+    When p and q are (anti)parallel the axis is undefined; we return
+    the identity (for p = q) or a π rotation around an arbitrary
+    perpendicular direction (for p = -q).
+    """
+    cos_th = float(np.dot(p, q))
+    cos_th = max(-1.0, min(1.0, cos_th))
+    theta = math.acos(cos_th)
+    if theta < 1e-12:
+        return np.array([1.0, 0.0, 0.0, 0.0])
+    cr = np.cross(p, q)
+    n = np.linalg.norm(cr)
+    if n < 1e-12:
+        # Antipodal: pick any perpendicular axis
+        perp = np.array([1.0, 0.0, 0.0]) if abs(p[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        axis = np.cross(p, perp)
+        axis /= np.linalg.norm(axis)
+    else:
+        axis = cr / n
+    return rotor_from_axis_angle(axis, theta)
+
+
+def triangle_berry_clifford(p_a, p_b, p_c):
+    """
+    Compute the Berry phase of parallel transport around the spherical
+    triangle (p_a → p_b → p_c → p_a) by composing three Cl(3,0)
+    rotor-valued parallel transports and extracting the net rotation
+    angle about the base point p_a.
+
+    Pure Cl(3,0) computation: the only primitives used are qmul
+    (the geometric product in the even subalgebra) and dot products
+    to align the axis of the composed rotor with the base point.
+    """
+    R_ab = rotor_transport(p_a, p_b)
+    R_bc = rotor_transport(p_b, p_c)
+    R_ca = rotor_transport(p_c, p_a)
+    # Compose right-to-left: apply R_ab first, then R_bc, then R_ca
+    R_total = qmul(R_ca, qmul(R_bc, R_ab))
+
+    # The composed rotor rotates about an axis parallel to p_a.
+    # Its bivector part should be aligned with the bivector dual of p_a:
+    #   axis p_a = (p_a_x, p_a_y, p_a_z) ↔ bivector (p_a_z, -p_a_y, p_a_x)
+    biv_expected = np.array([p_a[2], -p_a[1], p_a[0]])
+    biv_actual = R_total[1:]
+    biv_mag = np.linalg.norm(biv_actual)
+    sign = 1.0
+    dot = float(np.dot(biv_actual, biv_expected))
+    if dot < 0:
+        sign = -1.0
+    # angle = 2 * atan2(|bivector|, scalar), with sign from axis alignment
+    return sign * 2.0 * math.atan2(biv_mag, R_total[0])
+
+
+def verify_berry_phase(n_trials=50, rng=None):
+    """
+    Verify that the signed Euler-Eriksson solid-angle formula used in
+    cell600.py agrees with an independent Cl(3,0) rotor-composition
+    Berry phase calculation.
+
+    Both routes compute the same invariant two ways:
+      (a) Euler-Eriksson: 2·atan2(a·(b×c), 1 + a·b + b·c + c·a)
+      (b) Cl(3,0) rotor composition of three geodesic transports.
+    If they disagree the geometric substrate is broken.
+    """
+    if rng is None:
+        rng = np.random.default_rng(42)
+    max_err = 0.0
+    for _ in range(n_trials):
+        # Sample three random points on S², avoiding degeneracies
+        pts = rng.standard_normal((3, 3))
+        pts /= np.linalg.norm(pts, axis=1, keepdims=True)
+        a, b, c = pts
+        # Signed solid angle via Euler-Eriksson (matches cell600.py)
+        triple = float(np.dot(a, np.cross(b, c)))
+        denom = 1.0 + float(np.dot(a, b)) + float(np.dot(b, c)) + float(np.dot(c, a))
+        berry_ee = math.atan2(triple, denom)
+        # Signed Berry phase via Cl(3,0) rotor composition. Composing
+        # three transports produces a rotation by 2·Berry about the
+        # base point (the factor-of-two is the usual spin/rotor double
+        # cover), so compare triangle_berry_clifford / 2 to berry_ee.
+        berry_cf = triangle_berry_clifford(a, b, c) / 2.0
+        err = abs(berry_ee - berry_cf)
+        # Handle wrap-around (both values live in (-π, π))
+        err = min(err, abs(err - 2 * math.pi), abs(err + 2 * math.pi))
+        max_err = max(max_err, err)
+    return max_err
+
+
+try:
+    _berry_err = verify_berry_phase(50)
+    _berry_verified = _berry_err < 1e-8
+except Exception:
+    _berry_err = None
+    _berry_verified = False

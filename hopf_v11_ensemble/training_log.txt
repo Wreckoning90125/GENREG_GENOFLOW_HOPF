@@ -1,0 +1,7 @@
+v11 Ensemble — v10 + face readouts
+v10 alone:  0.9739 (m=5000, alpha=0.01)
+face alone: 0.8931 (m=2000, alpha=0.1)
+best ensemble: 0.9739 (w=0.0)
+delta vs v10: +0.000%
+Cl(3,0) Berry phase verified: True
+Baselines: v10 97.39%, v9 96.12%, v8 87.46%

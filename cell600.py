@@ -452,6 +452,91 @@ def get_geometry():
 
     print(f"  McKay: irrep dims {irrep_dims} → E₈ marks {e8_marks} ✓")
 
+    # -------------------------------------------------------
+    # v11: Face-level geometry — 2-forms via de Rham ladder
+    #
+    # The 600-cell is a 3-cell-complex triangulation of S³:
+    #   Ω⁰ (vertices) → d₀ → Ω¹ (edges) → d₁ → Ω² (triangles) → d₂ → Ω³ (cells)
+    # S³ is simply connected and H^k = 0 for k > 0, so by Hodge theory
+    # every 2-form splits as (exact) ⊕ (co-exact). The exact 2-forms
+    # are precisely the image of d₁ acting on 1-forms.
+    #
+    # Intertwining relation:
+    #   if  L₁_coex v = λ v  with v a co-exact 1-form eigenvector,
+    #   then d₁ v is an eigenvector of L₂_exact = d₁ d₁ᵀ with eigenvalue λ
+    #   (same spectrum, shifted from edges to triangles).
+    #
+    # This gives face eigenspaces "for free" from the cached curl ones,
+    # without having to enumerate tetrahedra. Multiplicities match:
+    #   face_eigenspaces ↔ curl_eigenspaces, mults [6, 16, 30, 48]
+    # -------------------------------------------------------
+    print("  Building face (2-form) eigenspaces from d₁ ∘ curl...")
+    d1_face = build_face_boundary(edges, triangles)    # (n_tri, n_edges)
+
+    # Fixed per-vertex Hopf S² points — used to weight triangle signals
+    # by the Berry phase picked up traversing the vertex quaternions.
+    # Each vertex IS a unit quaternion, so we Hopf-project it directly.
+    w = vertices[:, 0]
+    a = vertices[:, 1]
+    b = vertices[:, 2]
+    c = vertices[:, 3]
+    vertex_hopf = np.column_stack([
+        2.0 * (w * b + a * c),
+        2.0 * (w * c - a * b),
+        w * w + a * a - b * b - c * c,
+    ])  # (120, 3) — unit vectors on S²
+
+    # Fixed per-triangle Berry phase (= solid angle / 2, by the
+    # Hannay/Berry theorem for the Hopf bundle on S²).
+    # Computed via Euler-Eriksson and verified against a Cl(3,0) rotor
+    # composition in hopf_controller.verify_geometric_ops.
+    tri_idx = np.array(triangles, dtype=np.int64)   # (n_tri, 3)
+    pi = vertex_hopf[tri_idx[:, 0]]
+    pj = vertex_hopf[tri_idx[:, 1]]
+    pk = vertex_hopf[tri_idx[:, 2]]
+    # Normalize (should already be unit, but numerical safety)
+    pi_n = pi / (np.linalg.norm(pi, axis=1, keepdims=True) + 1e-12)
+    pj_n = pj / (np.linalg.norm(pj, axis=1, keepdims=True) + 1e-12)
+    pk_n = pk / (np.linalg.norm(pk, axis=1, keepdims=True) + 1e-12)
+    triple = np.einsum("ti,ti->t",
+                       pi_n, np.cross(pj_n, pk_n))   # (n_tri,)
+    denom = (1.0
+             + np.einsum("ti,ti->t", pi_n, pj_n)
+             + np.einsum("ti,ti->t", pj_n, pk_n)
+             + np.einsum("ti,ti->t", pk_n, pi_n))
+    # Signed Berry phase: 2 * atan2(triple, denom) / 2 = atan2(triple, denom)
+    # The sign carries orientation of the spherical triangle — critical,
+    # otherwise we lose chirality and the holonomy picture collapses.
+    tri_berry = np.arctan2(triple, denom)           # (n_tri,) signed, in (-π, π)
+
+    # Face eigenspaces via intertwining: d₁ maps co-exact 1-form
+    # eigenvectors to exact 2-form eigenvectors with the same eigenvalue.
+    # Orthonormalize each image since |d₁ v|² = λ |v|² (not unit).
+    face_eigenspaces = []
+    for ces in _CACHE["curl_eigenspaces"]:
+        V_curl = ces["vectors"]              # (720, mult)
+        lam = ces["eigenvalue"]
+        # d1 @ V_curl: (1200, mult)
+        V_face_raw = d1_face @ V_curl
+        # QR orthonormalize (eigenvalues preserved, but basis cleaned up)
+        Q_face, _ = np.linalg.qr(V_face_raw)
+        face_eigenspaces.append({
+            "eigenvalue": float(lam),
+            "vectors": Q_face,               # (1200, mult)
+            "multiplicity": int(V_curl.shape[1]),
+        })
+
+    _CACHE["d1"] = d1_face
+    _CACHE["vertex_hopf"] = vertex_hopf
+    _CACHE["triangle_berry"] = tri_berry
+    _CACHE["triangle_indices"] = tri_idx
+    _CACHE["face_eigenspaces"] = face_eigenspaces
+
+    total_face = sum(fe["multiplicity"] for fe in face_eigenspaces)
+    print(f"    Face eigenspaces: {[fe['multiplicity'] for fe in face_eigenspaces]} "
+          f"(total {total_face} 2-form modes)")
+    print(f"    Berry phase range: [{tri_berry.min():.4f}, {tri_berry.max():.4f}] rad")
+
     print("[cell600] Geometry construction complete.")
     return _CACHE
 
