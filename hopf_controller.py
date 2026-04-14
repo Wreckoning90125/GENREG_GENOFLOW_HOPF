@@ -1,23 +1,61 @@
 # ================================================================
-# Hopf Geometric Controller v6 — Per-Eigenspace Hopf Projections
+# Hopf Geometric Feature Extractor
 #
-# v5 problem: only E₁ (4D dipole) got directional Hopf treatment.
-# The other 8 eigenspaces were crushed to scalar norms — discarding
-# all spatial phase information from frequencies that distinguish digits.
+# This module contains geometric primitives on S³ / S² and several
+# controller classes that use them. All classes here are fixed feature
+# extractors feeding a linear or kernel ridge readout — none of them
+# implement a multi-stage Hopf architecture with Hopf projection
+# *between* computational stages and accumulated holonomy across
+# passes. The current production accuracy path is ADEHopfController
+# (v8/v9) with multi-scale kappa / Nystrom kernel ridge (v10), trained
+# in `train_ade_hopf.py`. Best MNIST result on record: 97.39% (v10).
+# Adding the Ω² / Ω³ face and cell eigenspaces (v11 in `train_v11.py`,
+# v12 in `train_v12.py`) does not improve MNIST accuracy over v10.
 #
-# v6 fix: Hopf-project ALL eigenspaces with dim ≥ 4.
-# Each eigenspace's first 4 coefficients are rotated by a learned
-# rotor and Hopf-projected to S², giving 3 directional features
-# per eigenspace. This preserves the fine spatial detail that v5 lost.
+# Primitives:
+#   hopf_project        — S³ → S² quadratic map. THIS IS THE NONLINEARITY.
+#   hopf_section        — S² → S³ section (gauge-dependent)
+#   hopf_lift           — section + fiber rotation
+#   pancharatnam_phase  — discrete parallel-transport phase between two S²
+#   solid_angle_triangle— unsigned spherical triangle area on S²
+#   holonomy_triangle   — signed Berry phase + transport phase for a
+#                         closed S² triangle (Euler–Eriksson route)
+#   triangle_berry_clifford — independent signed Berry phase via actual
+#                         Cl(3,0) rotor composition. Cross-checked
+#                         against Euler–Eriksson to machine precision
+#                         (see verify_berry_phase).
+#   poincare_warp       — radial conformal compression r → 2·tanh(r/2)
 #
-# Pipeline:
-#   1. Input → 600-cell → spectral decomposition into 9 irreps + 4 curl
-#   2. Each eigenspace (dim ≥ 4): learned rotor → Hopf S² → 3 features
-#   3. Eigenspace norms → McKay message passing on E₈ → 9 features
-#   4. Curl eigenspaces: same Hopf treatment + norms
-#   5. Linear readout from 50 geometric features
+# Controllers:
+#   HopfController       (v6) — per-eigenspace Hopf + McKay E₈ message
+#                               passing, trained by GA/ES. Historical.
+#   VertexHopfController (v7) — all 120 vertex activations through a
+#                               Hopf hidden layer, trained by ES.
+#                               Historical.
+#   ADEHopfController    (v8/v9) — ADE-structured feature extraction
+#                               with CG cross products and E₈ edge
+#                               features, fit by closed-form ridge.
+#                               v10 wraps this with multi-scale kappa
+#                               and polynomial kernel ridge via
+#                               Nystrom approximation. Current
+#                               production accuracy path.
 #
-# ~582 params. Every spectral band now contributes DIRECTION, not just energy.
+# Retraction notice. Earlier writeups (deleted per-version FINDINGS.md
+# files, now superseded by the top-level FINDINGS.md) interpreted the
+# signed Berry phase as a chirality-specific causal signal for MNIST
+# cross-digit transfer. Rigorous follow-up runs do not support that
+# interpretation: unit weights on the face eigenspace basis match or
+# beat signed-Berry-phase weights in every cell tested. The Berry
+# phase math here is correct and reusable; the chirality claim made
+# on top of it was not. See FINDINGS.md for the full tables and the
+# explicit retraction.
+#
+# Note on terminology: the irrep decomposition is a symmetry constraint
+# (it restricts the function class); Hopf projection is the actual
+# nonlinearity (it adds representational capacity). Those are not
+# interchangeable, and claims that the "irrep boundaries are the
+# nonlinearity" are not accurate in this code — `hopf_project` is, and
+# is labeled as such at its definition below.
 # ================================================================
 
 import math
@@ -94,7 +132,25 @@ def solid_angle_triangle(a, b, c):
 
 
 def holonomy_triangle(p1, p2, p_ref):
-    """Berry phase + transport phase from closed S² triangle."""
+    """Berry phase + transport phase from closed S² triangle.
+
+    Returns (berry, transport) where `berry` is -½ times the signed
+    solid angle of the oriented triangle (v1, v2, vr) on S², and
+    `transport` is the sum of three Pancharatnam phases around the
+    triangle.
+
+    The math is correct and reusable. An earlier hypothesis that the
+    sign of `berry` carries chirality-specific signal for MNIST
+    cross-digit transfer via a face-eigenspace weighting (v11/v12) was
+    not supported by rigorous follow-up runs; see FINDINGS.md for the
+    retraction and the full table of results. The function is kept
+    because the geometry is sound and because it remains available for
+    any future test on a task where chirality is the only signal.
+
+    See also `triangle_berry_clifford` for an independent
+    Clifford-algebraic computation of the same Berry phase, used by
+    v11 and v12 to cross-check the Euler–Eriksson route.
+    """
     v1, v2, vr = p1.copy(), p2.copy(), p_ref.copy()
     for v in [v1, v2, vr]:
         n = np.linalg.norm(v)
