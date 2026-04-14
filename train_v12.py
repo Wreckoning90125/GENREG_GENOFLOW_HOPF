@@ -218,7 +218,7 @@ def mnist_training_run():
     if _berry_verified:
         print("Cl(3,0) Berry phase verified")
 
-    out_dir = "hopf_v12_ade"
+    out_dir = "checkpoints/hopf_v12_ade"
     os.makedirs(out_dir, exist_ok=True)
 
     print("\nLoading MNIST...")

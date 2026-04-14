@@ -304,7 +304,7 @@ def main():
     print("=" * 60)
 
     # Setup
-    out_dir = "hopf_v10_ade"
+    out_dir = "checkpoints/hopf_v10_ade"
     os.makedirs(out_dir, exist_ok=True)
 
     # Load MNIST

@@ -187,7 +187,7 @@ def main():
     else:
         print(f"\nWARNING: Cl(3,0) Berry phase NOT verified (err={_berry_err})")
 
-    out_dir = "hopf_v11_ade"
+    out_dir = "checkpoints/hopf_v11_ade"
     os.makedirs(out_dir, exist_ok=True)
 
     # Load MNIST
