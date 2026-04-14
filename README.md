@@ -127,6 +127,47 @@ The IDE provides modular nodes to construct and monitor AI behavior.
 
 ---
 
+---
+
+## Hopf Geometric Feature Extractor (v8 – v12)
+
+The repository also contains a separate experimental subsystem that sits
+alongside the GenoFlow IDE: a closed-form kernel-ridge classifier on top
+of a hand-designed geometric feature basis derived from the 600-cell,
+its ADE eigenspace decomposition, and the discrete de Rham ladder up
+through Ω³ cell forms via the Hopf fibration S³ → S².
+
+Current best result: **97.39% MNIST test accuracy (v10)**, via a
+multi-scale polynomial kernel ridge over 879 fixed geometric features
+(three pixel-kernel softness scales × 293 features). No learned
+nonlinearities in the trained path; the feature extractor is fixed
+geometry and only the kernel ridge readout is fit. v11 and v12 extend
+the geometry (face / Ω² and cell / Ω³ eigenspaces) but **do not
+improve** MNIST accuracy over v10 — they sit at 97.32% and 97.24%
+respectively.
+
+- Current trainer: `train_ade_hopf.py` (v10)
+- Extended trainers: `train_v11.py`, `train_v12.py`
+- Feature extractor and geometric primitives: `hopf_controller.py`,
+  `ade_geometry.py`, `cell600.py`
+- Checkpoints: `checkpoints/hopf_v8_ade/` … `checkpoints/hopf_v12_ade/`
+
+**Read `FINDINGS.md` before citing or building on these results.** It
+documents what the numbers do and do not support, retracts an earlier
+chirality interpretation of the signed Berry phase that the rigorous
+cross-digit comparison did not reproduce, lists the experimental
+choices that are not pinned in this repo, and explains what has not
+yet been built (the multi-stage Hopf architecture from the original v2
+sketch). The next planned test for the Hopf subsystem is
+pre-registered in `PRE_REGISTRATION.md`.
+
+The Hopf subsystem is independent of the GenoFlow Snake IDE described
+above — it shares the repository but not the runtime. The Snake
+environment, protein network, and LiteGraph frontend remain as
+documented.
+
+---
+
 ## Contribution
 
 GenoFlow is an evolving project. Contributions are welcome.
