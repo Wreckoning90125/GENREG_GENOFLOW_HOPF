@@ -1,16 +1,17 @@
 # ================================================================
 # Hopf Geometric Feature Extractor
 #
-# This module contains geometric primitives on S³ / S² and several
-# controller classes that use them. All classes here are fixed feature
-# extractors feeding a linear or kernel ridge readout — none of them
-# implement a multi-stage Hopf architecture with Hopf projection
-# *between* computational stages and accumulated holonomy across
-# passes. The current production accuracy path is ADEHopfController
-# (v8/v9) with multi-scale kappa / Nystrom kernel ridge (v10), trained
-# in `train_ade_hopf.py`. Best MNIST result on record: 97.39% (v10).
-# Adding the Ω² / Ω³ face and cell eigenspaces (v11 in `train_v11.py`,
-# v12 in `train_v12.py`) does not improve MNIST accuracy over v10.
+# This module contains geometric primitives on S³ / S² and three
+# controller classes built on them. None of the classes implement a
+# multi-stage Hopf architecture with Hopf projection *between*
+# computational stages and accumulated holonomy across passes — that
+# architecture is described in the original v2 sketch and has not
+# been built. The current MNIST production accuracy path is
+# ADEHopfController (v8/v9) wrapped by the multi-scale kappa /
+# Nystrom polynomial kernel ridge in `train_ade_hopf.py` (v10).
+# Best MNIST result on record: 97.39% (v10). Adding the Ω² / Ω³
+# face and cell eigenspaces (v11 in `train_v11.py`, v12 in
+# `train_v12.py`) does not improve MNIST accuracy over v10.
 #
 # Primitives:
 #   hopf_project        — S³ → S² quadratic map. THIS IS THE NONLINEARITY.
@@ -28,17 +29,34 @@
 #
 # Controllers:
 #   HopfController       (v6) — per-eigenspace Hopf + McKay E₈ message
-#                               passing, trained by GA/ES. Historical.
+#                               passing on rotor parameters that are
+#                               LEARNED by GA/ES. Used as the optional
+#                               `controller_type="hopf"` path inside
+#                               `genreg_genome.py` for the Snake IDE,
+#                               and as a v6 MNIST trainer entry point
+#                               via `train_hopf_mnist.py`. Not the
+#                               current MNIST accuracy path.
 #   VertexHopfController (v7) — all 120 vertex activations through a
-#                               Hopf hidden layer, trained by ES.
-#                               Historical.
+#                               Hopf hidden layer with rotors LEARNED
+#                               by ES (`train_hopf_es.py`,
+#                               `train_hopf_rotor_es.py`). Reference
+#                               implementation; superseded for MNIST
+#                               by ADEHopfController.
 #   ADEHopfController    (v8/v9) — ADE-structured feature extraction
 #                               with CG cross products and E₈ edge
-#                               features, fit by closed-form ridge.
-#                               v10 wraps this with multi-scale kappa
-#                               and polynomial kernel ridge via
-#                               Nystrom approximation. Current
-#                               production accuracy path.
+#                               features. ZERO non-convex parameters:
+#                               the features are fixed geometric
+#                               functions of the input and only the
+#                               linear readout is fit (closed-form
+#                               ridge regression). v10 wraps this in
+#                               `train_ade_hopf.py` with multi-scale
+#                               kappa and polynomial kernel ridge via
+#                               Nystrom approximation. Current MNIST
+#                               production accuracy path. v11/v12
+#                               (separate trainers) extend the
+#                               feature set with Ω² face and Ω³ cell
+#                               eigenspaces; both saturate at v10's
+#                               accuracy and do not improve on it.
 #
 # Retraction notice. Earlier writeups (deleted per-version FINDINGS.md
 # files, now superseded by the top-level FINDINGS.md) interpreted the

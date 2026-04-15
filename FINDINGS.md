@@ -263,33 +263,52 @@ Any future chirality test run on this repo is expected to live under
 
 ## What stays, what goes
 
-### Kept (reusable math and real improvements)
+### Kept (reusable math, active code, and real improvements)
 
 - `hopf_controller.py` — geometric primitives (`hopf_project`,
   `hopf_section`, `hopf_lift`, `pancharatnam_phase`,
   `solid_angle_triangle`, `holonomy_triangle`,
-  `triangle_berry_clifford`, `poincare_warp*`) and controller
-  classes (v6, v7, v8/v9). The signed Berry phase code is kept
-  because the math is correct and reusable; it is not shown to
-  detect chirality in the tests that were run, but that is a
-  statement about the tests, not the primitive.
+  `triangle_berry_clifford`, `poincare_warp*`) and three controller
+  classes:
+  - `HopfController` (v6) — per-eigenspace Hopf + McKay E₈ message
+    passing with **learnable rotors trained by GA/ES**. Used by
+    `genreg_genome.py` as the optional `controller_type="hopf"`
+    path for Snake IDE genomes, and as a v6 MNIST trainer entry
+    point via `train_hopf_mnist.py`. Active code, not historical.
+  - `VertexHopfController` (v7) — 120 vertex activations through
+    a Hopf hidden layer with rotors trained by ES
+    (`train_hopf_es.py`, `train_hopf_rotor_es.py`). Reference
+    implementation of the all-vertex approach.
+  - `ADEHopfController` (v8/v9) — ADE-structured feature extraction
+    with **zero non-convex parameters**; only the linear readout is
+    fit. Wrapped by v10's multi-scale + Nystrom kernel ridge in
+    `train_ade_hopf.py`. Current MNIST accuracy path.
+  
+  The signed Berry phase code is kept because the math is correct
+  and reusable; it is not shown to detect chirality in the tests
+  that were run, but that is a statement about the tests, not the
+  primitive.
+
 - `cell600.py`, `ade_geometry.py` — 600-cell and ADE eigenspace
   machinery. Verified via Clifford algebra.
 - `train_ade_hopf.py` — current v10 trainer (multi-scale kernel
-  ridge). Best number in the repo.
+  ridge). Best MNIST number in the repo (97.39%).
 - `train_v11.py`, `train_v12.py` — v11 and v12 trainers. These do
   not improve on v10 in terms of MNIST accuracy, but the geometric
   features they build (face eigenspaces, triangle Berry, cell
   eigenspaces via d₂, co-exact Ω² via intertwining) are verified
-  against Clifford-algebraic cross-checks and are useful
+  against Clifford-algebraic cross-checks and are useful reference
   implementations of the discrete de Rham ladder on the 600-cell.
-  They are worth keeping as reference implementations of the full
-  ladder, even though v10 remains the production accuracy number.
-- All `checkpoints/hopf_v*_ade/` training logs. These are primary
-  evidence and should not be altered retroactively.
 - `train_hopf_mnist.py`, `train_hopf_es.py`, `train_hopf_rotor_es.py`
-  — historical GA / ES / hybrid trainers for v6–v7 controllers.
-  Retained as reference implementations of earlier approaches.
+  — GA / ES / hybrid trainers for the v6 and v7 controllers, on
+  MNIST. The controllers themselves remain in use; these scripts
+  are the entry points for re-training them.
+- `genreg_genome.py`, `genreg_controller.py`, `genreg_proteins.py`,
+  `genreg_population.py`, `start_server.py`, the `nodes/` and
+  `static/` and `frontend/` trees — the Snake / GenoFlow IDE
+  pipeline. Independent of the Hopf MNIST work; unchanged.
+- All `checkpoints/hopf_v*_ade/` training logs and best-checkpoint
+  files. These are primary evidence and are not altered retroactively.
 
 ### Removed (pre-rigorous overclaiming)
 
