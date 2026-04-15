@@ -100,5 +100,35 @@
     "More protein types for complex regulatory networks",
     "Distributed training across multiple processes",
     "Real-time genome inspection and editing"
-  ]
+  ],
+  "hopf_subsystem": {
+    "status": "experimental, separate from GenoFlow Snake IDE",
+    "summary": "Closed-form kernel-ridge classifier on fixed geometric features derived from the 600-cell ADE eigenspace decomposition, the Hopf fibration S^3 -> S^2, and the discrete de Rham ladder up through Omega^3 cell forms.",
+    "best_result": "97.39% MNIST test accuracy at v10 with multi-scale polynomial kernel ridge over 879 fixed features",
+    "training_is": "single closed-form (kernel) ridge solve, zero non-convex parameters",
+    "not_a_learned_controller": "the feature extractor is fixed geometry; only the readout is fit",
+    "version_progression": {
+      "v8": "177 features, linear ridge, 87.46%",
+      "v9": "293 features (+ curl Omega^1 + E8 edges), linear ridge, 96.12%",
+      "v10": "879 features (v9 x 3 kappas), poly kernel ridge Nystrom m=5000, 97.39%",
+      "v11": "1179 features (v10 + face Omega^2 + triangle Berry), poly kernel ridge, 97.32% (no MNIST improvement over v10)",
+      "v12": "1611 features (v11 + co-exact Omega^2 + cell Omega^3 via d2), poly kernel ridge, 97.24% (no MNIST improvement over v10)"
+    },
+    "current_entry_point": "train_ade_hopf.py",
+    "extended_entry_points": ["train_v11.py", "train_v12.py"],
+    "core_files": [
+      "hopf_controller.py - geometric primitives and controller classes (v6-v9), plus face/triangle/cell machinery used by v11/v12",
+      "cell600.py - 600-cell vertices and Laplacian eigendecomposition",
+      "ade_geometry.py - ADE-structured spectral decomposition with CG cross products",
+      "train_ade_hopf.py - current v10 trainer",
+      "train_v11.py - v11 trainer (adds Omega^2 face eigenspaces and triangle Berry)",
+      "train_v12.py - v12 trainer (adds Omega^3 cell eigenspaces via d2)"
+    ],
+    "checkpoints": "checkpoints/hopf_v8_ade through checkpoints/hopf_v12_ade",
+    "retractions": "An earlier interpretation of the signed Berry phase (holonomy_triangle in hopf_controller.py, extended by v11 triangle_berry and v12 cell chirality weights) as a chirality-specific causal signal is not supported by rigorous cross-digit transfer comparisons. See FINDINGS.md for the full tables and the explicit retraction.",
+    "see_also": [
+      "FINDINGS.md - honest results, retractions, documented arbitrary choices",
+      "PRE_REGISTRATION.md - pre-registered next test for the multi-stage Hopf architecture that has not yet been built"
+    ]
+  }
 }

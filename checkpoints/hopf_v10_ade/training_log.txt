@@ -1,0 +1,12 @@
+ADE Hopf v10 — Multi-Scale Kernel Ridge
+Kappa set: [3.0, 5.5, 8.0]
+Features per scale: 293
+Total features: 879
+Readout: polynomial kernel ridge (deg=2)
+Nystrom m: 5000
+Kernel alpha: 0.01
+Linear ridge test: 0.9495
+Kernel ridge test: 0.9739
+Final test accuracy: 0.9739
+Baseline (v9): 96.12%
+Baseline (v8): 87.46%

@@ -1,0 +1,6 @@
+ADE Hopf v8 Ridge Regression Results
+Features: 177
+Parameters: 1780
+Best alpha: 0.001
+Train accuracy: 0.8693
+Test accuracy: 0.8746

@@ -1,0 +1,13 @@
+{
+  "version": 12,
+  "kappa_set": [
+    3.0,
+    5.5,
+    8.0
+  ],
+  "n_features_total": 1611,
+  "test_acc": 0.9724,
+  "kernel_m": 4000,
+  "kernel_alpha": 0.01,
+  "berry_phase_verified": true
+}
