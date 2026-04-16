@@ -26,19 +26,26 @@ def load_mnist_split(split="train"):
     return _load_mnist(split)
 
 
-def extract_features_batch(images, ade, pixel_kernel):
+def extract_features_from_F(F, ade):
+    """Extract ADE features from pre-computed vertex activations.
+
+    This is the core feature extraction pipeline: takes (N, 120) vertex
+    activations and produces (N, 293) features via ADE eigenspace
+    decomposition, Hopf projections, CG cross products, curl features,
+    and E8 edge features. Used by both MNIST (via extract_features_batch)
+    and molecular pipelines (via mol_kernel.py).
+
+    Args:
+        F: (N, 120) array of vertex activations
+        ade: ADE geometry dict from get_ade()
+
+    Returns:
+        (N, n_features) array of features (293 for standard ADE config)
     """
-    Extract features for a batch of images.
-    Vectorized where possible for speed.
-    """
-    N = len(images)
+    N = F.shape[0]
     ade_es = ade["ade_eigenspaces"]
     e8_edges = ade["e8_edges"]
     e8_to_es = ade["e8_to_eigenspace"]
-
-    # Pixel -> vertex activations (fully vectorized)
-    X = np.array(images, dtype=np.float64)  # (N, 784)
-    F = X @ pixel_kernel  # (N, 120)
 
     # Process each eigenspace
     all_features = []
@@ -153,14 +160,11 @@ def extract_features_batch(images, ade, pixel_kernel):
                             (2.0 * np.tanh(val / 2.0)).reshape(N, 1))
 
     # Curl eigenspace features (edge/differential reading, Theorem 5)
-    # By Hodge orthogonality, d0@f (exact 1-form) is ⊥ co-exact eigenspaces.
-    # Use multiplicative edge signal h_e = f_i * f_j to access curl modes.
     curl_es = ade.get("curl_eigenspaces", [])
     if curl_es:
         edge_list = ade["edges"]
         ei = np.array([e[0] for e in edge_list])  # (720,)
         ej = np.array([e[1] for e in edge_list])  # (720,)
-        # Process in chunks to limit peak memory (avoid full N x 720 allocation)
         chunk_size = 10000
         for ces in curl_es:
             V_curl = ces["vectors"]    # (720, mult)
@@ -196,30 +200,39 @@ def extract_features_batch(images, ade, pixel_kernel):
 
     # E8 edge features: norm interactions + directional interactions
     for ni, nj in e8_edges:
-        ei = e8_to_es[ni]
-        ej = e8_to_es[nj]
-        ni_val = all_es_norms[ei]
-        nj_val = all_es_norms[ej]
+        ei_idx = e8_to_es[ni]
+        ej_idx = e8_to_es[nj]
+        ni_val = all_es_norms[ei_idx]
+        nj_val = all_es_norms[ej_idx]
         prod = ni_val * nj_val
         asym = ni_val / (nj_val + 1e-6) - nj_val / (ni_val + 1e-6)
-        # Norm features
         norm_feats = np.column_stack([
             2.0 * np.tanh(prod / 2.0),
             2.0 * np.tanh(asym / 2.0)
         ])
-        # Directional features along E8 edges
-        if ei in all_es_hopf and ej in all_es_hopf:
-            hi = all_es_hopf[ei]  # (N, 3)
-            hj = all_es_hopf[ej]  # (N, 3)
-            dot = np.sum(hi * hj, axis=1)  # (N,)
-            cross = np.cross(hi, hj)       # (N, 3)
-            cross_mag = np.linalg.norm(cross, axis=1)  # (N,)
+        if ei_idx in all_es_hopf and ej_idx in all_es_hopf:
+            hi = all_es_hopf[ei_idx]  # (N, 3)
+            hj = all_es_hopf[ej_idx]  # (N, 3)
+            dot = np.sum(hi * hj, axis=1)
+            cross = np.cross(hi, hj)
+            cross_mag = np.linalg.norm(cross, axis=1)
             dir_feats = np.column_stack([dot, cross_mag])
         else:
             dir_feats = np.zeros((N, 2))
         all_features.append(np.column_stack([norm_feats, dir_feats]))
 
     return np.hstack(all_features)
+
+
+def extract_features_batch(images, ade, pixel_kernel):
+    """
+    Extract features for a batch of images.
+    Thin wrapper: maps pixels to vertex activations, then calls
+    extract_features_from_F for the ADE feature pipeline.
+    """
+    X = np.array(images, dtype=np.float64)
+    F = X @ pixel_kernel  # (N, 120)
+    return extract_features_from_F(F, ade)
 
 
 def ridge_regression(X, Y, alpha=1.0):
