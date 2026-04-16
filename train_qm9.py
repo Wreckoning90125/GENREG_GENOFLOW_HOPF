@@ -46,7 +46,7 @@ def evaluate_mae(predictions, targets):
 
 
 def train_and_evaluate(X_train, y_train, X_test, y_test,
-                       property_name, unit_name, unit_scale):
+                       property_name, unit_name, unit_scale, **kwargs):
     """Run linear ridge + kernel ridge on one property. Return results dict."""
     n_train, n_feat = X_train.shape
     results = {"property": property_name, "unit": unit_name,
@@ -83,8 +83,9 @@ def train_and_evaluate(X_train, y_train, X_test, y_test,
     gc.collect()
 
     # --- Polynomial kernel ridge (Nystrom) ---
-    # Only if we have enough samples
-    if n_train >= 500:
+    # Only if we have enough samples and caller wants it
+    skip_kernel = kwargs.get("skip_kernel", False)
+    if n_train >= 500 and not skip_kernel:
         print(f"\n  Kernel ridge on {property_name}:")
         m_vals = [min(2000, n_train // 2)]
         if n_train >= 5000:
@@ -137,6 +138,8 @@ def main():
                         default=[3.0, 5.5, 8.0])
     parser.add_argument("--sigmas", type=float, nargs="+",
                         default=[0.5, 1.0, 2.0])
+    parser.add_argument("--linear-only", action="store_true",
+                        help="Skip kernel ridge (use when features >> samples/10)")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -257,12 +260,14 @@ def main():
         # 600-cell features
         print("\n  --- 600-cell geometric features ---")
         result = train_and_evaluate(X_train, y_train, X_test, y_test,
-                                    prop_name, unit_name, unit_scale)
+                                    prop_name, unit_name, unit_scale,
+                                    skip_kernel=args.linear_only)
 
         # Coulomb matrix baseline
         print("\n  --- Coulomb matrix baseline ---")
         cm_result = train_and_evaluate(CM_train_s, y_train, CM_test_s, y_test,
-                                       prop_name + "_CM", unit_name, unit_scale)
+                                       prop_name + "_CM", unit_name, unit_scale,
+                                       skip_kernel=args.linear_only)
         result["cm_linear_mae"] = cm_result["linear_mae"]
         result["cm_kernel_mae"] = cm_result.get("kernel_mae")
         result["cm_best_mae"] = cm_result["best_mae"]

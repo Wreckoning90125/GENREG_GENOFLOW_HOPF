@@ -1,0 +1,109 @@
+{
+  "kappas": [
+    5.5
+  ],
+  "sigmas": [
+    1.0
+  ],
+  "n_train": 110000,
+  "n_test": 13885,
+  "n_features": 1465,
+  "rotation_invariance": {
+    "mean_relative_change": 0.004229964740421709,
+    "max_relative_change": 0.009419088523245788
+  },
+  "results": [
+    {
+      "property": "gap",
+      "unit": "meV",
+      "n_train": 110000,
+      "n_features": 1465,
+      "linear_mae": 792.1768689618241,
+      "linear_alpha": 10.0,
+      "kernel_mae": null,
+      "best_mae": 792.1768689618241,
+      "cm_linear_mae": 831.1500355983347,
+      "cm_kernel_mae": null,
+      "cm_best_mae": 831.1500355983347
+    },
+    {
+      "property": "homo",
+      "unit": "meV",
+      "n_train": 110000,
+      "n_features": 1465,
+      "linear_mae": 377.9995601723409,
+      "linear_alpha": 100.0,
+      "kernel_mae": null,
+      "best_mae": 377.9995601723409,
+      "cm_linear_mae": 389.88296897907196,
+      "cm_kernel_mae": null,
+      "cm_best_mae": 389.88296897907196
+    },
+    {
+      "property": "lumo",
+      "unit": "meV",
+      "n_train": 110000,
+      "n_features": 1465,
+      "linear_mae": 848.5552227335538,
+      "linear_alpha": 1.0,
+      "kernel_mae": null,
+      "best_mae": 848.5552227335538,
+      "cm_linear_mae": 688.0984827311536,
+      "cm_kernel_mae": null,
+      "cm_best_mae": 688.0984827311536
+    },
+    {
+      "property": "U0",
+      "unit": "meV",
+      "n_train": 110000,
+      "n_features": 1465,
+      "linear_mae": 541487.407601408,
+      "linear_alpha": 10.0,
+      "kernel_mae": null,
+      "best_mae": 541487.407601408,
+      "cm_linear_mae": 3160.85495887776,
+      "cm_kernel_mae": null,
+      "cm_best_mae": 3160.85495887776
+    },
+    {
+      "property": "mu",
+      "unit": "D",
+      "n_train": 110000,
+      "n_features": 1465,
+      "linear_mae": 1.0064986573791859,
+      "linear_alpha": 100.0,
+      "kernel_mae": null,
+      "best_mae": 1.0064986573791859,
+      "cm_linear_mae": 0.9789567066884868,
+      "cm_kernel_mae": null,
+      "cm_best_mae": 0.9789567066884868
+    },
+    {
+      "property": "alpha",
+      "unit": "Bohr^3",
+      "n_train": 110000,
+      "n_features": 1465,
+      "linear_mae": 4.523922453368094,
+      "linear_alpha": 10.0,
+      "kernel_mae": null,
+      "best_mae": 4.523922453368094,
+      "cm_linear_mae": 2.94117289507813,
+      "cm_kernel_mae": null,
+      "cm_best_mae": 2.94117289507813
+    },
+    {
+      "property": "Cv",
+      "unit": "cal/(mol K)",
+      "n_train": 110000,
+      "n_features": 1465,
+      "linear_mae": 2.3679600124004416,
+      "linear_alpha": 100.0,
+      "kernel_mae": null,
+      "best_mae": 2.3679600124004416,
+      "cm_linear_mae": 0.9779007049824323,
+      "cm_kernel_mae": null,
+      "cm_best_mae": 0.9779007049824323
+    }
+  ],
+  "synthetic": false
+}

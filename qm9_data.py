@@ -51,16 +51,17 @@ PROPERTY_NAMES = [
     "Cv",        # 16 - heat capacity at 298.15K (cal/(mol K))
 ]
 
-# Indices of properties to predict (0-based from the property array)
-# Property array is 0-indexed starting from A (index 0 = A, not tag/index)
+# Indices of properties to predict (0-based into the 15-column property array)
+# CSV columns: A(0), B(1), C(2), mu(3), alpha(4), homo(5), lumo(6), gap(7),
+#              r2(8), zpve(9), u0(10), u298(11), h298(12), g298(13), cv(14)
 TARGET_INDICES = {
-    "gap":   7,   # HOMO-LUMO gap
-    "homo":  5,   # HOMO energy
-    "lumo":  6,   # LUMO energy
-    "U0":    10,  # Internal energy at 0K
-    "mu":    3,   # Dipole moment
-    "alpha": 4,   # Polarizability
-    "Cv":    14,  # Heat capacity
+    "gap":   7,   # HOMO-LUMO gap (Hartree)
+    "homo":  5,   # HOMO energy (Hartree)
+    "lumo":  6,   # LUMO energy (Hartree)
+    "U0":    10,  # Internal energy at 0K (Hartree)
+    "mu":    3,   # Dipole moment (Debye)
+    "alpha": 4,   # Polarizability (Bohr^3)
+    "Cv":    14,  # Heat capacity (cal/(mol K))
 }
 
 # Units for MAE reporting
@@ -85,11 +86,78 @@ N_VALID_QM9 = N_TOTAL_QM9 - N_EXCLUDED
 
 
 # ================================================================
-# QM9 XYZ parsing
+# QM9 parsing (SDF + CSV from DeepChem mirror)
 # ================================================================
 
+def parse_sdf(sdf_path):
+    """Parse gdb9.sdf into a list of (atoms, coords) tuples.
+
+    Returns:
+        list of (atoms, coords) where atoms is a list of element symbols
+        and coords is an (N_atoms, 3) numpy array in Angstroms.
+    """
+    molecules = []
+    with open(sdf_path, "r") as f:
+        lines = f.readlines()
+
+    i = 0
+    while i < len(lines):
+        # Skip molecule name and software lines
+        if i + 3 >= len(lines):
+            break
+        mol_name = lines[i].strip()
+        i += 3  # skip name, software, blank line
+
+        # Counts line: "N_atoms N_bonds ..."
+        counts = lines[i].strip().split()
+        n_atoms = int(counts[0])
+        i += 1
+
+        # Atom block
+        atoms = []
+        coords = []
+        for _ in range(n_atoms):
+            parts = lines[i].strip().split()
+            x, y, z = float(parts[0]), float(parts[1]), float(parts[2])
+            elem = parts[3]
+            atoms.append(elem)
+            coords.append([x, y, z])
+            i += 1
+
+        molecules.append((atoms, np.array(coords, dtype=np.float64)))
+
+        # Skip to next molecule (past bond block, M END, $$$$)
+        while i < len(lines) and lines[i].strip() != "$$$$":
+            i += 1
+        i += 1  # skip $$$$
+
+    return molecules
+
+
+def load_csv_properties(csv_path):
+    """Load QM9 properties from gdb9.sdf.csv.
+
+    Returns:
+        mol_ids: list of molecule IDs (e.g., 'gdb_1')
+        properties: (N, 19) array (A, B, C, mu, alpha, homo, lumo, gap,
+                    r2, zpve, u0, u298, h298, g298, cv, u0_atom, u298_atom,
+                    h298_atom, g298_atom)
+        col_names: list of column names
+    """
+    mol_ids = []
+    all_props = []
+    with open(csv_path, "r") as f:
+        header = f.readline().strip().split(",")
+        col_names = header[1:]  # skip mol_id
+        for line in f:
+            parts = line.strip().split(",")
+            mol_ids.append(parts[0])
+            all_props.append([float(x) for x in parts[1:]])
+    return mol_ids, np.array(all_props, dtype=np.float64), col_names
+
+
 def parse_xyz(filepath):
-    """Parse a single QM9 XYZ file.
+    """Parse a single QM9 XYZ file (kept for compatibility with figshare format).
 
     Returns:
         atoms: list of element symbols (e.g., ['C', 'H', 'H', 'H', 'H'])
@@ -124,86 +192,90 @@ def parse_xyz(filepath):
 # ================================================================
 
 def download_qm9(data_dir=None):
-    """Download QM9 dataset and exclusion list."""
+    """Download QM9 dataset from DeepChem S3 mirror (SDF + CSV format)."""
     import urllib.request
 
     if data_dir is None:
         data_dir = DATA_DIR
     os.makedirs(data_dir, exist_ok=True)
 
-    tar_path = os.path.join(data_dir, "dsgdb9nsd.xyz.tar.bz2")
-    exclude_path = os.path.join(data_dir, "uncharacterized.txt")
+    tar_path = os.path.join(data_dir, "gdb9.tar.gz")
+    extract_dir = os.path.join(data_dir, "xyz")
 
     if not os.path.exists(tar_path):
-        print(f"Downloading QM9 ({tar_path})...")
-        urllib.request.urlretrieve(QM9_URL, tar_path)
+        url = "https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/gdb9.tar.gz"
+        print(f"Downloading QM9 from DeepChem S3 ({url})...")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=300) as r:
+            data = r.read()
+        with open(tar_path, "wb") as f:
+            f.write(data)
+        print(f"  Downloaded {len(data)} bytes")
 
-    if not os.path.exists(exclude_path):
-        print(f"Downloading exclusion list ({exclude_path})...")
-        urllib.request.urlretrieve(EXCLUDE_URL, exclude_path)
-
-    # Extract
-    xyz_dir = os.path.join(data_dir, "xyz")
-    if not os.path.exists(xyz_dir):
+    if not os.path.exists(extract_dir) or \
+       not os.path.exists(os.path.join(extract_dir, "gdb9.sdf")):
         print("Extracting...")
-        os.makedirs(xyz_dir, exist_ok=True)
-        with tarfile.open(tar_path, "r:bz2") as tar:
-            tar.extractall(xyz_dir)
+        os.makedirs(extract_dir, exist_ok=True)
+        with tarfile.open(tar_path, "r:gz") as tar:
+            tar.extractall(extract_dir)
 
-    return xyz_dir, exclude_path
-
-
-def load_exclusion_list(exclude_path):
-    """Load the list of excluded molecule indices."""
-    excluded = set()
-    with open(exclude_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                parts = line.split()
-                if parts:
-                    try:
-                        excluded.add(int(parts[0]))
-                    except ValueError:
-                        continue
-    return excluded
+    sdf_path = os.path.join(extract_dir, "gdb9.sdf")
+    csv_path = os.path.join(extract_dir, "gdb9.sdf.csv")
+    return sdf_path, csv_path
 
 
 def load_qm9(data_dir=None):
-    """Load the full QM9 dataset.
+    """Load the full QM9 dataset from DeepChem SDF + CSV format.
 
     Returns:
         all_coords: list of (N_atoms, 3) arrays in Angstroms
         all_atoms: list of lists of element symbols
-        all_properties: (N_molecules, 15) array
+        all_properties: (N_molecules, 15) array (A through Cv)
         all_indices: list of integer molecule indices
     """
     if data_dir is None:
         data_dir = DATA_DIR
 
-    xyz_dir, exclude_path = download_qm9(data_dir)
-    excluded = load_exclusion_list(exclude_path)
+    sdf_path, csv_path = download_qm9(data_dir)
 
+    # Parse structures from SDF
+    print("Parsing SDF structures...")
+    molecules = parse_sdf(sdf_path)
+    print(f"  Parsed {len(molecules)} molecules from SDF")
+
+    # Parse properties from CSV
+    print("Parsing CSV properties...")
+    mol_ids, all_props_raw, col_names = load_csv_properties(csv_path)
+    print(f"  Parsed {len(mol_ids)} property rows from CSV")
+    print(f"  Columns: {col_names[:7]}... ({len(col_names)} total)")
+
+    # Use the first 15 property columns (A through Cv),
+    # skip the _atom columns which are atomization energies
+    all_properties = all_props_raw[:, :15]
+
+    # Build output lists (only molecules present in both SDF and CSV)
+    n_use = min(len(molecules), len(mol_ids))
     all_coords = []
     all_atoms = []
-    all_properties = []
     all_indices = []
 
-    for i in range(1, N_TOTAL_QM9 + 1):
-        if i in excluded:
-            continue
-        fname = os.path.join(xyz_dir, f"dsgdb9nsd_{i:06d}.xyz")
-        if not os.path.exists(fname):
-            continue
-        atoms, coords, props = parse_xyz(fname)
+    for i in range(n_use):
+        atoms, coords = molecules[i]
         all_coords.append(coords)
         all_atoms.append(atoms)
-        all_properties.append(props)
-        all_indices.append(i)
+        # Extract index from mol_id (e.g., 'gdb_1' -> 1)
+        try:
+            idx = int(mol_ids[i].split("_")[1])
+        except (IndexError, ValueError):
+            idx = i + 1
+        all_indices.append(idx)
 
-    all_properties = np.array(all_properties, dtype=np.float64)
-    print(f"Loaded {len(all_coords)} QM9 molecules "
-          f"({N_EXCLUDED} excluded, {len(excluded)} in exclusion list)")
+    all_properties = all_properties[:n_use]
+    print(f"Loaded {n_use} QM9 molecules")
+    print(f"  Atom types in dataset: "
+          f"{sorted(set(a for mol in all_atoms for a in mol))}")
+    print(f"  Max atoms per molecule: "
+          f"{max(len(a) for a in all_atoms)}")
     return all_coords, all_atoms, all_properties, all_indices
 
 
