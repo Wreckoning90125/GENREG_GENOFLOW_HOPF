@@ -135,9 +135,9 @@ def main():
     print(f"  NaN: {n_nan}, Inf: {n_inf}, dead: {dead}/{X_all.shape[1]}")
     X_all = np.nan_to_num(X_all)
 
-    # Split and standardize
-    X_train = X_all[train_idx]
-    X_test = X_all[test_idx]
+    # Split and standardize (upcast to float64 for ridge numerical stability)
+    X_train = X_all[train_idx].astype(np.float64)
+    X_test = X_all[test_idx].astype(np.float64)
     del X_all; gc.collect()
 
     mu = X_train.mean(axis=0)

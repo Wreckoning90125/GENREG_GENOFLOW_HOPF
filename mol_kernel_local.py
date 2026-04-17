@@ -127,52 +127,66 @@ def atom_centered_activations(coords, atoms, kappa, rbf_centers, rbf_gamma,
 def extract_atom_centered_features(all_coords, all_atoms, ade,
                                     kappas=(3.0, 5.5, 8.0),
                                     n_rbf=20, rbf_min=0.5, rbf_max=6.0,
-                                    rbf_gamma=10.0, cutoff=5.0):
+                                    rbf_gamma=10.0, cutoff=5.0,
+                                    chunk_size=5000):
     """Full pipeline: molecules -> atom-centered ADE features.
 
-    For each molecule, for each (kappa, channel, rbf):
-      - atom-centered vertex activations -> extract_features_from_F -> 293 features
-    Concatenate all blocks. Sum over atoms is inside atom_centered_activations.
+    Processes molecules in chunks to keep peak memory under control.
+    For each chunk: compute atom-centered vertex activations, extract
+    293 ADE features per (kappa, channel, rbf) combo, write into
+    pre-allocated output matrix, free intermediates.
 
     Returns:
-        (N_mol, n_features) array
+        (N_mol, n_features) float32 array
     """
     from train_ade_hopf import extract_features_from_F
 
     rbf_centers, gamma = gaussian_rbf_centers(rbf_min, rbf_max, n_rbf, rbf_gamma)
     n_mol = len(all_coords)
     n_combos = len(kappas) * N_CH * n_rbf
+    n_feat = 293 * n_combos
     print(f"  Atom-centered features: {len(kappas)} kappas x {N_CH} channels "
           f"x {n_rbf} RBFs = {n_combos} combos, "
-          f"expect {293 * n_combos} features/mol")
+          f"expect {n_feat} features/mol")
+    print(f"  Chunk size: {chunk_size}, estimated memory: "
+          f"{n_mol * n_feat * 4 / 1e9:.1f} GB (float32)")
 
-    # Pre-compute all vertex activations: (n_mol, N_CH, n_rbf, 120) per kappa
-    all_blocks = []
-    combo = 0
+    X_all = np.zeros((n_mol, n_feat), dtype=np.float32)
+
     for ki, kappa in enumerate(kappas):
-        # Compute activations for all molecules at this kappa
-        mol_acts = []
-        for mi in range(n_mol):
-            c = all_coords[mi].copy()
-            act = atom_centered_activations(c, all_atoms[mi], kappa,
-                                             rbf_centers, gamma, cutoff)
-            mol_acts.append(act)
-            if mi > 0 and mi % 5000 == 0:
-                print(f"    kappa={kappa}: {mi}/{n_mol} molecules")
-        print(f"    kappa={kappa}: {n_mol}/{n_mol} molecules done")
+        for start in range(0, n_mol, chunk_size):
+            end = min(start + chunk_size, n_mol)
+            n_chunk = end - start
 
-        # Extract features for each (channel, rbf) combination
-        for ch in range(N_CH):
-            for r in range(n_rbf):
-                combo += 1
-                F = np.array([mol_acts[mi][ch, r] for mi in range(n_mol)])
-                feats = extract_features_from_F(F, ade)
-                all_blocks.append(feats)
-                if combo % 50 == 0:
-                    print(f"  Features: {combo}/{n_combos}")
+            # Compute vertex activations for this chunk
+            chunk_acts = []
+            for mi in range(start, end):
+                act = atom_centered_activations(
+                    all_coords[mi], all_atoms[mi], kappa,
+                    rbf_centers, gamma, cutoff)
+                chunk_acts.append(act)  # (N_CH, n_rbf, 120)
 
-    print(f"  Features: {n_combos}/{n_combos} done")
-    return np.hstack(all_blocks)
+            # Extract features for each (channel, rbf) combo
+            for ch in range(N_CH):
+                for r in range(n_rbf):
+                    combo_idx = ki * (N_CH * n_rbf) + ch * n_rbf + r
+                    col_start = combo_idx * 293
+                    col_end = col_start + 293
+
+                    F = np.array([chunk_acts[i][ch, r]
+                                  for i in range(n_chunk)])  # (n_chunk, 120)
+                    feats = extract_features_from_F(F, ade)  # (n_chunk, 293)
+                    X_all[start:end, col_start:col_end] = feats.astype(np.float32)
+
+            del chunk_acts
+
+            if (start // chunk_size) % 5 == 0 or end == n_mol:
+                print(f"    kappa={kappa}: {end}/{n_mol} molecules, "
+                      f"{ki * (n_mol // chunk_size + 1) + start // chunk_size + 1} chunks done")
+
+    print(f"  Feature matrix: {X_all.shape}, "
+          f"{np.sum(X_all.std(axis=0) < 1e-12)} dead features")
+    return X_all
 
 
 def test_atom_centered_rotation_invariance(n_molecules=10, seed=42):
