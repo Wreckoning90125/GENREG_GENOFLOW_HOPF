@@ -1,0 +1,79 @@
+{
+  "method": "atom-centered 600-cell (SOAP-on-the-600-cell)",
+  "kappas": [
+    5.5
+  ],
+  "n_rbf": 3,
+  "rbf_range": [
+    0.5,
+    6.0
+  ],
+  "rbf_gamma": 10.0,
+  "cutoff": 5.0,
+  "n_train": 110000,
+  "n_test": 13885,
+  "n_features": 4395,
+  "rotation_invariance": {
+    "mean": 0.019279018150510915,
+    "max": 0.06937399566670768
+  },
+  "results": [
+    {
+      "property": "gap",
+      "unit": "meV",
+      "local_mae": 680.4873043137513,
+      "local_alpha": 0.01,
+      "cm_mae": 831.1500419246448,
+      "cm_alpha": 0.01
+    },
+    {
+      "property": "homo",
+      "unit": "meV",
+      "local_mae": 299.32987970395266,
+      "local_alpha": 1.0,
+      "cm_mae": 389.1075828434066,
+      "cm_alpha": 1000.0
+    },
+    {
+      "property": "lumo",
+      "unit": "meV",
+      "local_mae": 592.4782920077864,
+      "local_alpha": 0.01,
+      "cm_mae": 688.0984942742912,
+      "cm_alpha": 0.01
+    },
+    {
+      "property": "U0",
+      "unit": "meV",
+      "local_mae": 456210.0001342079,
+      "local_alpha": 100.0,
+      "cm_mae": 3160.85495887776,
+      "cm_alpha": 10.0
+    },
+    {
+      "property": "mu",
+      "unit": "D",
+      "local_mae": 0.7140854062908232,
+      "local_alpha": 1.0,
+      "cm_mae": 0.9789567225927707,
+      "cm_alpha": 0.01
+    },
+    {
+      "property": "alpha",
+      "unit": "Bohr^3",
+      "local_mae": 2.875057773316536,
+      "local_alpha": 100.0,
+      "cm_mae": 2.939663188515356,
+      "cm_alpha": 1000.0
+    },
+    {
+      "property": "Cv",
+      "unit": "cal/(mol K)",
+      "local_mae": 0.998502137736386,
+      "local_alpha": 10.0,
+      "cm_mae": 0.9779007360893189,
+      "cm_alpha": 0.01
+    }
+  ],
+  "synthetic": false
+}
