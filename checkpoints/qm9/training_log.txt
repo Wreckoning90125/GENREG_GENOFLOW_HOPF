@@ -1,0 +1,15 @@
+600-Cell Geometric Features on QM9
+Kappas: (5.5,)
+Sigmas: (1.0,)
+Features: 1465
+Train: 110000, Test: 13885
+Synthetic: False
+Rotation invariance: mean_rc=0.0042, max_rc=0.0094
+
+gap: 600-cell=792.18 meV, CM=831.15 meV
+homo: 600-cell=378.00 meV, CM=389.88 meV
+lumo: 600-cell=848.56 meV, CM=688.10 meV
+U0: 600-cell=541487.41 meV, CM=3160.85 meV
+mu: 600-cell=1.01 D, CM=0.98 D
+alpha: 600-cell=4.52 Bohr^3, CM=2.94 Bohr^3
+Cv: 600-cell=2.37 cal/(mol K), CM=0.98 cal/(mol K)
