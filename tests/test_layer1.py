@@ -76,26 +76,61 @@ def test_curl_A_equals_B():
     assert slope >= 1.7, f"curl A - B slope {slope:.3f} < 1.7"
 
 
-def test_reference_helicity_is_resolution_stable():
-    """reference_helicity at (1,1) must stabilise as resolution increases.
-
-    We compare res=64 and res=96 at the same bbox halfwidth=4. Relative
-    difference should be < 1e-3.
-    """
-    from hopf_seed import reference_helicity
-
-    H_64 = reference_helicity(1, 1, 1.0, resolution=64, halfwidth=4.0)
-    H_96 = reference_helicity(1, 1, 1.0, resolution=96, halfwidth=4.0)
-    rel = abs(H_96 - H_64) / abs(H_96)
-    assert rel < 1e-3, f"reference_helicity not resolution-stable: {H_64} vs {H_96}"
-
-
 def test_analytic_invariants():
     from hopf_seed import analytic_iota, analytic_linking_number
 
     for w1, w2 in [(1, 1), (2, 1), (3, 2), (2, 3), (5, 3)]:
         assert analytic_iota(w1, w2) == pytest.approx(w1 / w2)
         assert analytic_linking_number(w1, w2) == w1 * w2
+
+
+@pytest.mark.parametrize(
+    "n,m,expected_over_pi2",
+    [
+        (1, 1, 1.0),
+        (2, 1, 4.0 / 3.0),
+        (1, 2, 4.0 / 3.0),
+        (3, 2, 6.0 / 5.0),
+        (2, 3, 6.0 / 5.0),
+        (3, 3, 9.0 / 10.0),
+        (4, 4, 16.0 / 35.0),
+    ],
+)
+def test_analytic_helicity_closed_form(n, m, expected_over_pi2):
+    """analytic_helicity matches H/pi^2 = 2nm * n!m! / (n+m)!"""
+    import math
+    from hopf_seed import analytic_helicity
+
+    H = analytic_helicity(n, m, R=1.0)
+    assert H / (math.pi ** 2) == pytest.approx(expected_over_pi2, abs=1e-12)
+
+
+def test_analytic_helicity_R_scaling():
+    """H scales as R^4 by dimensional analysis; the closed form must
+    reproduce that exactly."""
+    from hopf_seed import analytic_helicity
+
+    H1 = analytic_helicity(2, 3, R=1.0)
+    H2 = analytic_helicity(2, 3, R=2.0)
+    assert H2 / H1 == pytest.approx(16.0, abs=1e-12)
+
+
+def test_grid_helicity_matches_closed_form():
+    """At large bbox + decent resolution, the numerical grid helicity
+    matches the closed-form analytic_helicity to better than 1e-3."""
+    from hopf_seed import analytic_helicity
+    from hopf_grid import build_grid, sample_seed_on_grid, grid_helicity
+
+    bbox = (-10.0, 10.0, -10.0, 10.0, -10.0, 10.0)
+    grid = build_grid(bbox, 96)
+    for w1, w2 in [(1, 1), (2, 1), (3, 2)]:
+        B, A = sample_seed_on_grid(grid, w1, w2, 1.0)
+        H_grid = grid_helicity(A, B, grid["dx"])
+        H_an = analytic_helicity(w1, w2, 1.0)
+        rel = abs(H_grid - H_an) / abs(H_an)
+        assert rel < 1e-3, (
+            f"({w1},{w2}): grid H={H_grid}, analytic H={H_an}, rel_err={rel}"
+        )
 
 
 # -----------------------------------------------------------------------------

@@ -128,18 +128,18 @@ def main():
     p.add_argument("--skip-berry", action="store_true", help="skip field-line / Berry")
     p.add_argument("--no-hdf5", action="store_true")
     p.add_argument("--no-vtk", action="store_true")
-    p.add_argument("--h-unit-reference", action="store_true",
-                   help="also compute reference_helicity(1,1,R=1) at res 96")
     args = p.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    from hopf_seed import analytic_iota, analytic_linking_number, reference_helicity
+    from hopf_seed import analytic_iota, analytic_linking_number, analytic_helicity
 
     print(f"[hopf_layer1] omega1={args.omega1}, omega2={args.omega2}, R={args.R}")
     print(f"[hopf_layer1] bbox={tuple(args.bbox)}, resolution={args.resolution}")
+    H_an = analytic_helicity(args.omega1, args.omega2, args.R)
     print(f"[hopf_layer1] iota={analytic_iota(args.omega1, args.omega2)}  "
-          f"linking={analytic_linking_number(args.omega1, args.omega2)}")
+          f"linking={analytic_linking_number(args.omega1, args.omega2)}  "
+          f"H_analytic={H_an:.6f}")
 
     print("[hopf_layer1] building grid + sampling seed...")
     grid, B, A, grid_residuals = build_and_verify_grid(
@@ -172,11 +172,11 @@ def main():
                 f"agree={r['berry_routes_agree']:.2e}"
             )
 
-    # Assemble metadata
-    h_ref = None
-    if args.h_unit_reference:
-        print("[hopf_layer1] computing reference_helicity at (1, 1, R=1) res 96...")
-        h_ref = reference_helicity(1, 1, 1.0, resolution=96, halfwidth=4.0)
+    # Assemble metadata. Report grid helicity vs the closed-form value.
+    H_grid = grid_residuals["helicity_grid"]
+    helicity_relative_error = abs(H_grid - H_an) / abs(H_an) if H_an != 0 else 0.0
+    print(f"[hopf_layer1] H_grid={H_grid:.6f}  H_analytic={H_an:.6f}  "
+          f"rel_err={helicity_relative_error:.4e}")
 
     meta: Dict[str, Any] = {
         "omega1": int(args.omega1),
@@ -186,7 +186,8 @@ def main():
         "resolution": int(args.resolution),
         "iota": float(analytic_iota(args.omega1, args.omega2)),
         "linking_number": int(analytic_linking_number(args.omega1, args.omega2)),
-        "reference_helicity_1_1_R1_res96": h_ref,
+        "analytic_helicity": float(H_an),
+        "helicity_relative_error": float(helicity_relative_error),
         "residuals": grid_residuals,
         "600cell_witness": witness,
         "fieldline_diagnostics": fieldlines,
