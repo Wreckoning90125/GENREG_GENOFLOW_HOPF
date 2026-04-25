@@ -19,12 +19,41 @@ Field-line topology:
     linking number of any two distinct field lines on the same flux
     surface = omega1 * omega2.
 
+CONVENTION (pinned, see CONSULTATION.md Q4):
+    omega1 = poloidal winding number    (turns around the core circle)
+    omega2 = toroidal winding number    (turns around the symmetry axis)
+    iota   = omega1 / omega2            (= poloidal / toroidal)
+    linking_number = omega1 * omega2
+
+This matches the standard stellarator convention (iota = poloidal-per-
+toroidal). Verification against a live VMEC / DESC import format is the
+remaining open piece; the convention itself is now pinned at the
+module level via the CONVENTION constant below so any downstream
+mismatch will surface as a single point of failure.
+
+Naming: this module's "helicity" is always the volumetric Hopf
+invariant H = int A.B dV (units of B^2 . length^4). It is NOT the
+QUASR / Landreman 'helicity' field, which is the integer M in {0, 1}
+of the quasi-symmetry direction (qs_axis_class). The two are sibling-
+but-not-equal topological labels; do not conflate. See
+RESEARCH_PROGRAM.md Addendum and CONSULTATION.md Q3.
+
 This module is pure numpy. All gradients are in closed form; no finite
 differences, no sympy codegen.
 """
 from __future__ import annotations
 
 import numpy as np
+
+
+CONVENTION = {
+    "omega1_role": "poloidal winding number",
+    "omega2_role": "toroidal winding number",
+    "iota_definition": "omega1 / omega2 (poloidal-per-toroidal)",
+    "linking_number_definition": "omega1 * omega2",
+    "helicity_meaning": "volumetric Hopf invariant H = int A.B dV "
+                       "(NOT the QUASR qs_axis_class)",
+}
 
 
 def stereographic_R3_to_S3(x, y, z, R=1.0):
@@ -210,10 +239,23 @@ def analytic_helicity(omega1, omega2, R=1.0):
     Specific values (R = 1):
         H(1, 1) = pi^2          = 9.8696
         H(2, 1) = 4 pi^2 / 3    = 13.1595
-        H(2, 2) = 4 pi^2 / 3    = 13.1595
+        H(2, 2) = 4 pi^2 / 3    = 13.1595      [note: same as H(2, 1)]
         H(3, 2) = 6 pi^2 / 5    = 11.8435
-        H(3, 3) = 9 pi^2 / 10   = 8.8827
-        H(4, 4) = 16 pi^2 / 35  = 4.5117
+        H(3, 3) = 9 pi^2 / 10   = 8.8827       [note: SMALLER than H(1, 1)]
+        H(4, 4) = 16 pi^2 / 35  = 4.5117       [note: smaller still]
+
+    Important reading: volumetric helicity is NOT the linking number
+    squared. The linking number is omega1 * omega2 (so 9 for (3, 3),
+    16 for (4, 4)) but H(3, 3) < H(1, 1) and H(4, 4) is half of H(1, 1).
+    The combinatorial denominator C(n + m, n) suppresses high-bidegree
+    configurations because the Hopf bundle is more tightly compressed
+    at higher (n, m): the same R^3 volume hosts a higher-link field at
+    smaller per-fibre amplitude, and the total int A.B dV decreases.
+    Topological lower bound H <= |link|^2 . H_unit; the closed form
+    above gives the actual H, which is much smaller for high (n, m).
+    Practical implication: high-(n, m) Hopfions are NOT automatically
+    the "best" seeds for downstream optimization (omnigenity or
+    otherwise); they carry less volumetric helicity per unit linking.
 
     Magnetic helicity is gauge-invariant only when B . n_hat vanishes
     on the integration boundary. B decays as |x|^-6 at infinity, so the

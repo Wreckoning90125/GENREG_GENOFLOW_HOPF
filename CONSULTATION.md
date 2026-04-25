@@ -243,11 +243,20 @@ This is the most consequential question that came back from
 consultation. The next-phase plan needs to be written against this
 reorientation.
 
-### Q4 — `omega1 / omega2` vs stellarator iota convention  [OPEN]
+### Q4 — `omega1 / omega2` vs stellarator iota convention  [PARTIALLY PINNED]
 
-Still need to confirm the sign / `2 pi` / swap convention against the
-equilibrium-code import format. Not load-bearing for the Layer 2
-refactor, but required before the seed handoff in Layer 4/5.
+**Action taken.** `hopf_seed.CONVENTION` constant now pins
+`omega1 = poloidal winding`, `omega2 = toroidal winding`,
+`iota = omega1 / omega2 = poloidal / toroidal` to match the standard
+stellarator convention. Naming clarified in module docstring: this
+repo's "helicity" is always the volumetric Hopf invariant
+`H = int A.B dV`, NOT the QUASR / Landreman `helicity` field which is
+the integer `M in {0, 1}` qs_axis_class.
+
+**Still open.** Verification against a live VMEC / DESC import format.
+Required before the seed handoff in any QA/QH-handoff branch (which
+per Q3/Q7 we are explicitly NOT taking). For the in-repo omnigenity
+lab path, this is a non-issue.
 
 ### Q5 — Berry phase per `(n, m)`  [OPEN, low priority]
 
@@ -288,34 +297,84 @@ This avoids the explicit 720-edge group action — we use the existing
 eigendecomposition as an oracle for the irrep grading. The longer-term
 move is the sqlite ingest; the immediate move is the refactor.
 
-### Q7 — Layer 2 framing: in-repo discrete relaxation, or pure handoff?  [OPEN, reweighted by Q3]
+### Q7 — Layer 2 framing: in-repo discrete relaxation, or pure handoff?  [RESOLVED → option (b)]
 
-Given Q3, Layer 2 reframing: the in-repo lab now has two distinct
-audiences.
+**Decision: build the in-repo omnigenity-relaxation lab. Skip the
+QA/QH-handoff path.** Three reasons:
 
-- **(a) GLEMuR / FEEC handoff** — feed B_0 to a standard relaxation,
-  let it settle to a (possibly non-axisymmetric) equilibrium, hand off
-  to surface extraction. Useful primarily for QA/QH targets.
-- **(b) Omnigenity-targeted relaxation lab** — build the metric Hodge
-  star on the 600-cell and run a Kraus–Maj-style variational integrator
-  to relax a Hopfion seed under a constraint that targets omnigenity
-  rather than QA/QH. This is a real research move, not a reproduction
-  of an existing code.
+1. **The QA/QH market is saturated.** QUASR is 371,701 entries; the
+   Garren–Boozer near-axis pipeline + VMEC / DESC refinement is a
+   working stack with 37,936 configurations already at
+   `qs_error < 1e-8`. A Hopfion-flavoured seed for QA/QH is a marginal
+   improvement to a mature pipeline, competing on initial-guess
+   quality. The differentiating contribution is not there.
+2. **Omnigenity has weaker theoretical scaffolding and is the natural
+   fit for the irrep machinery** already built. Omnigenity is the
+   condition that bounce-averaged radial drift vanishes — equivalently,
+   that field-line trajectories close (on average) under the bounce
+   action. This is fundamentally a symmetry / group-theoretic
+   condition. The 2I-irrep Hodge decomposition (machine-zero harmonic
+   leak, exact `[0, 4, 9, 16, 25, 36, 9, 16, 4]` dimension matching)
+   is exactly the tool that lights up here: omnigenity's bounce-action
+   decomposition lives in invariant subspaces of some discrete
+   symmetry, and finding the right one is an open problem. The
+   600-cell with 2I action is a controlled lab where "which irreps
+   host omnigenous fields and which don't" gets sharp answers.
+3. **Layer 1 already paid the precision price.** Going from 3% harmonic
+   leak to 6e-16 is a 13-orders-of-magnitude reduction in noise floor.
+   That precision is wasted on QA/QH seed generation (downstream
+   VMEC / DESC noise floor is ~1e-8 at best). But for a structural
+   claim about which bounce-action equivalence classes are achievable
+   in the 2I-symmetric sector, machine zero is the right precision: it
+   lets you make rigorous "this irrep is in the kernel" claims, not
+   just "approximately small."
 
-(a) is the shorter path; (b) is the higher-value path **if the Q3
-omnigenity opening is real**. This wants confirmation from Landreman /
-omnigenity-paper familiarity before committing.
+**Stage plan (concrete, dependency-ordered):**
+
+- **Stage 1 — metric Hodge star on the 600-cell.** Closed-form
+  circumcentric weights from the icosian quaternion coordinates
+  (option (i): exact under 2I, fast). Switch to Whitney-form Galerkin
+  (option (ii)) only if (i) reveals spectral pathologies (negative
+  eigenvalues from non-Delaunay cells, kernel larger than 2I
+  predicts). 1-2 days.
+- **Stage 2 — discrete bounce action on edges.** `J(alpha) = oint p
+  parallel dl` along closed edge-paths. 2I orbits give 10
+  representatives via the classical Hopf decomposition of the 600-cell
+  (10 great circles of 12 vertices each, partitioning the 120
+  vertices). 2-3 days.
+- **Stage 3 — Kraus–Maj variational integrator.** Discrete Lagrangian
+  on edges, structure-preserving symplectic integrator on the 1-skeleton.
+  4-7 days. The unknown — Kraus–Maj on a discrete polytope is
+  non-standard and may want a separate writeup before code.
+- **Stage 4 — equivariant decomposition of the bounce action.** Compute
+  `J_irrep[i] = <J, P_i J>` per irrep. Omnigenous configurations are
+  precisely those where `J_irrep[i] = 0` for `i != trivial`. 1 day,
+  uses the projectors already built in Layer 1.
+
+Total: 1.5-2 weeks for a working omnigenity lab on the 600-cell. Honest
+off-ramp: if Stage 1 reveals unfixable spectral issues, switch to
+Whitney-form (1-2 weeks added). If THAT fails, the 600-cell is too
+coarse and we go to the 120-cell or a tetrahedral subdivision. The
+off-ramp adds time, doesn't kill the project.
+
+The decision criterion (made explicit): this work is a **mathematical
+physics contribution**, not a plasma engineering contribution. The
+Layer 1 work already prioritized irrep-native precision over
+engineering throughput; the lab is the consistent next move.
 
 ## What would close the remaining loop
 
 In priority order:
 
-1. **Q3 / Q7 commitment** — confirmation that the omnigenity-sector
-   opening is real, and a recommendation: target QA/QH handoff (a) or
-   build the omnigenity-relaxation lab (b)?
-2. **Q4** — convention check before any seed handoff.
-3. **Q2** — full derivation written out. Locally feasible from the
-   recipe; nice to have; not load-bearing.
-4. **Q5** — Berry-phase formula. Diagnostic only.
-5. **Q6 sqlite ingest** — clone the SG230 schema for 2I/600-cell.
+1. **Stage 1 of the lab** — metric Hodge star, circumcentric weights.
+   Closed-form on the 600-cell because of icosian symmetry. 1-2 days.
+   Requires explicit go-ahead before swinging.
+2. **Q2** — full DLMF-anchored derivation written out. Locally
+   feasible; nice to have; not load-bearing for the lab.
+3. **Q4 verification** — only required if any handoff to an external
+   equilibrium code is contemplated. Not blocking the lab.
+4. **Q5** — Berry-phase formula. Per consultation, this is a derived
+   quantity from the bounce-action machinery, not a starting point.
+   Defer until after Stage 2.
+5. **Q6 sqlite ingest** — clone the SG230 schema for 2I / 600-cell.
    Long-term infrastructure, not blocking.
