@@ -316,3 +316,121 @@ def test_vtk_writes_valid_file():
         img = pv.read(path)
         assert "B" in img.point_data
         assert img.point_data["B"].shape == (12 * 12 * 12, 3)
+
+
+# -----------------------------------------------------------------------------
+# Stage 1: metric Hodge star on the 600-cell (CONSULTATION.md Q7 -> option b).
+# -----------------------------------------------------------------------------
+
+def test_hodge_stars_are_scalar_times_identity():
+    """Every k-cell of the regular 600-cell lies in a single H_4-orbit,
+    so the circumcentric Hodge star is a scalar . I on each cochain
+    space. This is the property that makes 2I-equivariance automatic."""
+    import math
+    import numpy as np
+    from hopf_metric import (
+        hodge_star_0, hodge_star_1, hodge_star_2, hodge_star_3,
+        STAR_0_SCALAR, STAR_1_SCALAR, STAR_2_SCALAR, STAR_3_SCALAR,
+    )
+
+    for star, scalar, dim in [
+        (hodge_star_0(), STAR_0_SCALAR, 120),
+        (hodge_star_1(), STAR_1_SCALAR, 720),
+        (hodge_star_2(), STAR_2_SCALAR, 1200),
+        (hodge_star_3(), STAR_3_SCALAR, 600),
+    ]:
+        assert star.shape == (dim, dim)
+        # Diagonal with constant entries
+        diag = np.diag(star)
+        assert np.allclose(diag, scalar, atol=1e-14)
+        off = star - np.diag(diag)
+        assert np.max(np.abs(off)) < 1e-14
+
+
+def test_hodge_star_consistency_identity():
+    """*_0 . *_3 = 5 exactly (cell-per-vertex orbit ratio
+    600 / 120 = 5)."""
+    from hopf_metric import STAR_0_SCALAR, STAR_3_SCALAR
+    assert abs(STAR_0_SCALAR * STAR_3_SCALAR - 5.0) < 1e-14
+
+
+def test_hodge_stars_are_2I_equivariant_trivially():
+    """A scalar . I commutes with every linear operator, so no group
+    action need be introduced to check 2I-equivariance. The test
+    asserts the algebraic property directly: the Hodge star is in the
+    centre of End(C^k(600-cell))."""
+    import numpy as np
+    from hopf_metric import hodge_star_1
+    star = hodge_star_1()
+    rng = np.random.default_rng(0)
+    for _ in range(8):
+        M = rng.standard_normal(star.shape)
+        commutator = star @ M - M @ star
+        assert np.max(np.abs(commutator)) < 1e-12
+
+
+def test_metric_laplacian_irrep_multiplicities():
+    """Delta_0 = *_0^{-1} d0^T *_1 d0 decomposes by 2I isotypic with
+    multiplicities matching the combinatorial Laplacian's:
+    [1, 4, 9, 16, 25, 36, 9, 16, 4] in the cell600 ordering by
+    eigenvalue. Within each isotypic block, Schur's lemma forces the
+    operator to be a scalar times the identity (NOT just a scalar
+    eigenvalue with multiplicity d^2 for an unstructured operator;
+    the d^2-dim isotypic is d copies of the d-dim irrep, and 2I-
+    equivariance plus the additional H_4 invariance of Delta forces a
+    single eigenvalue across all d copies)."""
+    import numpy as np
+    from hopf_metric import metric_laplacian_0
+    from cell600 import get_geometry
+
+    L = metric_laplacian_0()
+    g = get_geometry()
+    expected_mults = [1, 4, 9, 16, 25, 36, 9, 16, 4]
+    for i, es in enumerate(g["scalar_eigenspaces"]):
+        V = es["vectors"]
+        assert V.shape[1] == expected_mults[i]
+        # Schur's lemma + H_4 invariance: L | block = lambda_i I
+        block = V.T @ L @ V
+        diag = np.diag(block)
+        off = block - np.diag(diag)
+        assert np.max(np.abs(off)) < 1e-12, (
+            f"isotypic block {i} not diagonal: off-diag max {np.max(np.abs(off))}"
+        )
+        spread = float(np.max(diag) - np.min(diag))
+        assert spread < 1e-12, (
+            f"isotypic block {i} eigenvalue spread {spread} > 1e-12"
+        )
+
+
+def test_metric_to_combinatorial_eigenvalue_ratio_is_exact():
+    """Metric eigenvalues are combinatorial eigenvalues scaled by
+    exactly *_1 / *_0 (= STAR_1_SCALAR / STAR_0_SCALAR), because
+    Delta_0_metric = (*_1 / *_0) Delta_0_combinatorial when the Hodge
+    stars are scalar . I."""
+    import numpy as np
+    from hopf_metric import (
+        metric_laplacian_0,
+        STAR_0_SCALAR,
+        STAR_1_SCALAR,
+    )
+    from cell600 import get_geometry
+
+    L_metric = metric_laplacian_0()
+    g = get_geometry()
+    d0 = g["d0"]
+    L_comb = d0.T @ d0
+
+    expected_ratio = STAR_1_SCALAR / STAR_0_SCALAR
+    for es in g["scalar_eigenspaces"]:
+        V = es["vectors"]
+        block_metric = V.T @ L_metric @ V
+        block_comb = V.T @ L_comb @ V
+        # Both blocks are scalar . I within the isotypic
+        eig_metric = np.diag(block_metric).mean()
+        eig_comb = np.diag(block_comb).mean()
+        if abs(eig_comb) < 1e-10:
+            continue   # trivial isotypic, both zero
+        ratio = eig_metric / eig_comb
+        assert abs(ratio - expected_ratio) < 1e-12, (
+            f"isotypic eigenvalue ratio {ratio} != expected {expected_ratio}"
+        )
