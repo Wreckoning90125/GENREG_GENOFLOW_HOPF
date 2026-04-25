@@ -138,35 +138,64 @@ def test_grid_helicity_matches_closed_form():
 # -----------------------------------------------------------------------------
 
 def test_600cell_chain_complex_is_zero():
-    """d1 . d0 = 0 and d2 . d1 = 0 structurally on the reduced complex."""
+    """d1 . d0 = 0 and d2 . d1 = 0 structurally on the full complex."""
     from hopf_600cell_witness import embed_600cell, check_chain_complex
 
-    emb = embed_600cell(R=1.0)
+    emb = embed_600cell()
     dd01, dd12 = check_chain_complex(emb)
     assert dd01 == 0.0
     assert dd12 == 0.0
 
 
-def test_600cell_witness_runs_end_to_end():
-    """The second witness produces finite residuals for (3, 2)."""
-    from hopf_seed import seed_field, seed_vector_potential
+def test_isotypic_dim_table_matches_2I_decomposition():
+    """The image-d0 dims per irrep must reproduce the d^2 pattern of 2I
+    irreps in the regular representation, with the trivial irrep
+    contributing 0 (constants are in ker d0).
+    """
+    from hopf_600cell_witness import embed_600cell, isotypic_dim_table
+
+    emb = embed_600cell()
+    table = isotypic_dim_table(emb)
+    assert table["total_vertex_dim"] == 120, table
+    assert table["total_edge_image_d0"] == 119, table
+    # Vertex isotypic dims (sorted by index, which matches the cell600
+    # scalar_eigenspaces order): squared 2I irrep dims.
+    expected_vertex = [1, 4, 9, 16, 25, 36, 9, 16, 4]
+    actual_vertex = [r["vertex_isotypic_dim"] for r in table["per_irrep"]]
+    assert actual_vertex == expected_vertex, (expected_vertex, actual_vertex)
+    # Edge image-d0 dims: the trivial irrep is in the kernel of d0,
+    # so its image is 0; all others image the full d^2 dim.
+    expected_image = [0] + expected_vertex[1:]
+    actual_image = [r["edge_image_d0_dim"] for r in table["per_irrep"]]
+    assert actual_image == expected_image, (expected_image, actual_image)
+
+
+@pytest.mark.parametrize("omega1,omega2", [(1, 1), (2, 1), (3, 2), (2, 3), (4, 4)])
+def test_600cell_witness_harmonic_zero(omega1, omega2):
+    """Hard test: with native S^3 sampling on the full 120-vertex
+    complex, 2I-equivariance is preserved exactly and H^1(S^3) = 0
+    forces the harmonic component to be identically zero (machine-
+    precision floating point).
+
+    This is the rank-2-tensor / equivariant claim made executable: the
+    correct coordinate chart for this problem is the 2I-irrep grading,
+    and respecting it gives the predicted machine-zero leak.
+    """
     from hopf_600cell_witness import run_witness
 
-    def Bfn(x, y, z):
-        return seed_field(x, y, z, 3, 2, 1.0)
-
-    def Afn(x, y, z):
-        return seed_vector_potential(x, y, z, 3, 2, 1.0)
-
-    r = run_witness(Bfn, Afn, R=1.0)
-    assert r["n_vertices"] >= 119
+    r = run_witness(omega1, omega2, R=1.0)
     assert r["chain_d1_d0"] == 0.0
     assert r["chain_d2_d1"] == 0.0
-    # Exact + nonexact fractions together should reconstruct the norm
-    # within numerical tolerance
-    total = r["exact_fraction"] ** 2 + r["nonexact_fraction"] ** 2
-    assert 0.99 < total < 1.01, f"Hodge split ||exact||^2+||nonexact||^2 = {total}"
-    assert np.isfinite(r["discrete_helicity_crude"])
+    assert r["harmonic_leak_relative"] < 1e-12, (
+        f"harmonic leak {r['harmonic_leak_relative']:.3e} not below 1e-12 "
+        f"for ({omega1}, {omega2})"
+    )
+    # Exact + coexact must reconstruct A_edges since harmonic = 0:
+    # ||A||^2 = ||A_exact||^2 + ||A_coexact||^2
+    total = r["exact_fraction"] ** 2 + r["coexact_fraction"] ** 2
+    assert abs(total - 1.0) < 1e-10, (
+        f"Hodge split sum of squares = {total} (expect 1) for ({omega1}, {omega2})"
+    )
 
 
 # -----------------------------------------------------------------------------

@@ -263,6 +263,57 @@ Each of those is a concrete deliverable with a consumer (GLEMuR input
 format, DESC input format, SIMSOPT objective-function hook) and can be
 evaluated independently of whether the rest of the program ever ships.
 
+## Addendum (post-consultation): the Hopfion seed targets the omnigenity sector, not QA/QH
+
+Empirical structure of the Landreman QUASR catalogue (371,701 quasi-
+symmetric configurations, the live state of QS-stellarator design)
+reframes where the Hopfion-seed contribution actually sits in the
+pipeline. Documented in `CONSULTATION.md` Q3.
+
+- The QUASR `helicity` field is the **integer helical-period class
+  M ∈ {0, 1}** of the quasi-symmetry direction
+  `B = B(ψ, M·θ − N·φ)`. M=0 → QA (200,946 entries), M=1 → QH
+  (170,755 entries). **This is not the volumetric Hopf invariant.**
+  It is a sibling-but-not-equal topological label of the magnetic
+  axis self-linking.
+- ι is a continuous output, not a topology selector. The catalogue
+  sweeps ι freely within each `(nfp, helicity)` sector. So
+  "rational ι Hopfion seed" does not compete with the standard
+  pipeline for topological reasons — the standard pipeline does not
+  constrain ι to be rational at all.
+- The current pipeline is Garren–Boozer near-axis expansion + VMEC
+  / DESC refinement (Landreman & Sengupta; *Mapping the space of QS
+  stellarators using optimized near-axis expansion*; etc.). The
+  Hopfion seed is not a competitor to this for QA/QH targets.
+
+The opening for the Hopfion family is in the **omnigenity / quasi-
+isodynamic sector** that lies outside the `helicity ∈ {0, 1}`
+dichotomy. The relevant literature: *Direct construction of
+optimized stellarator shapes III: omnigenity near the magnetic
+axis*, *Weakly Quasisymmetric Near-Axis Solutions to all Orders*.
+The (n, m) topology of the Hopfion encodes a choice of
+field-line-link / -twist that could parameterize a near-axis ansatz
+in the omnigenity sector, where Garren–Boozer's QA/QH structure
+does not apply.
+
+This re-orients the layer plan:
+
+- **Layer 1** (seeds): unchanged. The closed-form `(ω₁, ω₂)`
+  Hopfion family is the right object.
+- **Layer 2** (relaxation): the in-repo 600-cell relaxation lab is
+  more interesting than originally framed, because relaxing a
+  Hopfion under an omnigenity constraint is research, not
+  reproduction of existing codes. See `CONSULTATION.md` Q7.
+- **Layer 3-5** (extraction → chart → equilibrium → QS): not
+  necessarily VMEC/DESC for the QA/QH-Boozer objective. The
+  natural downstream codes are still DESC / SIMSOPT, but the
+  objective function targets omnigenity (e.g., Landreman omnigenity
+  metric) rather than the QA/QH Boozer-spectrum minimisation.
+
+Layer 1 ships independently of this reframing. Layers 2-5 should
+be revisited under the omnigenity lens before the next round of
+implementation.
+
 ## References
 
 - Smiet et al. — generalized Hopf fields with prescribed rotational

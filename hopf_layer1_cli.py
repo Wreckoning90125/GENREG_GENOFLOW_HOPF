@@ -51,16 +51,8 @@ def build_and_verify_grid(omega1, omega2, R, bbox, resolution):
 
 
 def run_600cell_witness(omega1, omega2, R):
-    from hopf_seed import seed_field, seed_vector_potential
     from hopf_600cell_witness import run_witness
-
-    def Bfn(x, y, z):
-        return seed_field(x, y, z, omega1, omega2, R)
-
-    def Afn(x, y, z):
-        return seed_vector_potential(x, y, z, omega1, omega2, R)
-
-    return run_witness(Bfn, Afn, R=R)
+    return run_witness(omega1, omega2, R=R)
 
 
 def run_fieldline_diagnostics(
