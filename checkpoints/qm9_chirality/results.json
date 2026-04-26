@@ -1,0 +1,84 @@
+{
+  "n_total": 30000,
+  "n_train": 21000,
+  "n_test": 6000,
+  "kappas": [
+    4.0
+  ],
+  "sigmas": [
+    1.0
+  ],
+  "n_features": 1465,
+  "results": [
+    {
+      "property": "gap",
+      "unit": "meV",
+      "mae_abs": 791.8059688987506,
+      "mae_signed": 778.8385053055684,
+      "delta": -12.967463593182174,
+      "pct_delta": -1.6377072291103607,
+      "alpha_abs": 100.0,
+      "alpha_signed": 100.0
+    },
+    {
+      "property": "homo",
+      "unit": "meV",
+      "mae_abs": 395.9561239709118,
+      "mae_signed": 387.07316873911367,
+      "delta": -8.882955231798121,
+      "pct_delta": -2.243419079546978,
+      "alpha_abs": 100.0,
+      "alpha_signed": 100.0
+    },
+    {
+      "property": "lumo",
+      "unit": "meV",
+      "mae_abs": 853.7193880097093,
+      "mae_signed": 828.1571051442907,
+      "delta": -25.562282865418638,
+      "pct_delta": -2.994225412288273,
+      "alpha_abs": 100.0,
+      "alpha_signed": 100.0
+    },
+    {
+      "property": "U0",
+      "unit": "meV",
+      "mae_abs": 537778.7479168801,
+      "mae_signed": 499129.9625193567,
+      "delta": -38648.785397523374,
+      "pct_delta": -7.186744650515083,
+      "alpha_abs": 10.0,
+      "alpha_signed": 100.0
+    },
+    {
+      "property": "mu",
+      "unit": "D",
+      "mae_abs": 1.0337559079833576,
+      "mae_signed": 1.022864282533011,
+      "delta": -0.01089162545034661,
+      "pct_delta": -1.0535974078826695,
+      "alpha_abs": 100.0,
+      "alpha_signed": 100.0
+    },
+    {
+      "property": "alpha",
+      "unit": "Bohr^3",
+      "mae_abs": 4.516953532389061,
+      "mae_signed": 4.331376895902329,
+      "delta": -0.18557663648673195,
+      "pct_delta": -4.10844688031534,
+      "alpha_abs": 10.0,
+      "alpha_signed": 100.0
+    },
+    {
+      "property": "Cv",
+      "unit": "cal/(mol K)",
+      "mae_abs": 2.3303234005225035,
+      "mae_signed": 2.280224639215677,
+      "delta": -0.05009876130682667,
+      "pct_delta": -2.149863031697384,
+      "alpha_abs": 100.0,
+      "alpha_signed": 100.0
+    }
+  ]
+}
