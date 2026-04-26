@@ -12,7 +12,7 @@ class Population:
     Manages a population of genomes and evolution.
     """
 
-    def __init__(self, size=50):
+    def __init__(self, size=50, fitness="trust"):
         self.size = size
         self.genomes = [Genome() for _ in range(size)]
         self.generation = 0
@@ -22,6 +22,13 @@ class Population:
         self.mutation_rate = 0.1
         self.mutation_scale = 0.3
         self.trust_inheritance = 0.5  # Children inherit 50% of parent trust
+
+        # Selection criterion: "trust" (gradual-approach proxy via the
+        # protein network) or "food" (actual game objective: count of
+        # food eaten in the evaluation episode). The trust signal is a
+        # designed fitness proxy; food is what the game scores. They
+        # can be misaligned -- see bench_snake.py results.
+        self.fitness = fitness
 
         # Stats
         self.best_trust = 0.0
@@ -53,13 +60,16 @@ class Population:
     def evolve(self):
         """
         Run one generation of evolution:
-        1. Sort by trust
+        1. Sort by fitness (trust or food, see self.fitness)
         2. Select survivors
         3. Reproduce with mutation
         4. Trust inheritance
         """
-        # Sort by trust (descending)
-        self.genomes.sort(key=lambda g: g.trust, reverse=True)
+        # Sort by selection criterion (descending)
+        if self.fitness == "food":
+            self.genomes.sort(key=lambda g: g.food_eaten, reverse=True)
+        else:
+            self.genomes.sort(key=lambda g: g.trust, reverse=True)
 
         # Select survivors
         n_survivors = max(1, int(self.size * self.survival_rate))
@@ -88,11 +98,16 @@ class Population:
         return self.get_stats()
 
     def _update_stats(self):
-        """Update population statistics."""
+        """Update population statistics. best_genome_idx tracks the
+        genome that's best by the active fitness criterion."""
         trusts = [g.trust for g in self.genomes]
+        foods = [g.food_eaten for g in self.genomes]
         self.best_trust = max(trusts)
         self.avg_trust = sum(trusts) / len(trusts)
-        self.best_genome_idx = trusts.index(self.best_trust)
+        if self.fitness == "food":
+            self.best_genome_idx = foods.index(max(foods))
+        else:
+            self.best_genome_idx = trusts.index(self.best_trust)
 
     def get_stats(self):
         """Get current population stats."""

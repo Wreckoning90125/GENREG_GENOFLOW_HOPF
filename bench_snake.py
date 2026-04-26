@@ -55,23 +55,24 @@ def count_params(controller):
     return n
 
 
-def make_population(size, controller_type, seed, signal_order):
+def make_population(size, controller_type, seed, signal_order, fitness="trust"):
     """Build a population of size N with the given controller type and a
     consistent set of default proteins. signal_order ensures every
     genome reads the same signal vector in the same order."""
     set_all_seeds(seed)
-    pop = Population(size=size)
+    pop = Population(size=size, fitness=fitness)
     for g in pop.genomes:
         from genreg_controller import Controller
         from hopf_controller import HopfController
         from snake_hopf_controller import SnakeHopfController
+        n_signals = len(signal_order)
         if controller_type == "snake_hopf":
             g.controller = SnakeHopfController(output_size=4, hidden_size=16)
         elif controller_type == "hopf":
-            g.controller = HopfController(input_size=11, hidden_size=16,
+            g.controller = HopfController(input_size=n_signals, hidden_size=16,
                                            output_size=4)
         else:
-            g.controller = Controller(input_size=11, hidden_size=16,
+            g.controller = Controller(input_size=n_signals, hidden_size=16,
                                        output_size=4)
         g.controller_type = controller_type
         g.signal_order = signal_order
@@ -118,6 +119,11 @@ def main():
     ap.add_argument("--controllers", type=str, nargs="+",
                     default=["mlp", "hopf", "snake_hopf"],
                     help="Which controller types to run head-to-head")
+    ap.add_argument("--fitness", type=str, default="trust",
+                    choices=["trust", "food"],
+                    help="Selection criterion: trust (protein-network "
+                         "proxy, the GENREG default) or food (the actual "
+                         "game objective: count of food eaten)")
     args = ap.parse_args()
 
     if args.smoke:
@@ -128,19 +134,24 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    # Standard signal order matching default proteins
+    # Standard signal order matching default proteins; head_dx/head_dy
+    # are now exposed by the Snake env so all controllers see the
+    # snake's heading.
     signal_order = [
         "steps_alive", "energy", "dist_to_food", "head_x", "head_y",
-        "food_x", "food_y", "food_dx", "food_dy", "near_wall", "alive",
+        "food_x", "food_y", "food_dx", "food_dy",
+        "head_dx", "head_dy", "near_wall", "alive",
     ]
+    print(f"\nFitness criterion: {args.fitness}")
 
     # Param-count comparison (one-shot, same for all seeds)
     set_all_seeds(0)
     from genreg_controller import Controller
     from hopf_controller import HopfController
     from snake_hopf_controller import SnakeHopfController
-    mlp_params = count_params(Controller(11, 16, 4))
-    hopf_params = count_params(HopfController(11, 16, 4))
+    n_sig = len(signal_order)
+    mlp_params = count_params(Controller(n_sig, 16, 4))
+    hopf_params = count_params(HopfController(n_sig, 16, 4))
     snakehopf_params = SnakeHopfController(output_size=4, hidden_size=16).n_params()
     print(f"\nParameter counts: MLP={mlp_params}, Hopf={hopf_params}, "
           f"SnakeHopf={snakehopf_params}")
@@ -157,7 +168,8 @@ def main():
             print(f"\n--- {ctype.upper()} controller ---")
             t0 = time.time()
             env = SnakeEnvironment(grid_size=10)
-            pop = make_population(args.population_size, ctype, seed, signal_order)
+            pop = make_population(args.population_size, ctype, seed,
+                                   signal_order, fitness=args.fitness)
             history = run_one_population(
                 pop, env, args.n_generations, args.steps_per_life, label=ctype
             )

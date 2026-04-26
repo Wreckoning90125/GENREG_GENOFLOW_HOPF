@@ -205,19 +205,29 @@ def snake_signals_to_activation(signals, kappa=4.0, grid_size=10):
     """Multi-channel directional embedding of Snake signals into a single
     120-vertex activation on the 600-cell.
 
+    KEY IMPROVEMENT: food direction is expressed in the SNAKE'S LOCAL
+    FRAME (rotated by the snake's heading). This bakes rotational
+    equivariance into the input: a snake heading north with food to
+    its right and a snake heading east with food to its right give
+    the same local-frame food vector, so they get the same embedding.
+    Both controllers (MLP, Hopf, SnakeHopf) get to see this signal --
+    fair comparison; but the geometric controller's affinity to the
+    cardinal-action axes makes it especially well-suited to use it.
+
     Channels (all summed into a single (120,) activation):
-        food_dir : food direction vector lifted to S^2 (z=0) -> S^3
-        head_pos : head grid coords stereographic-projected to S^2 -> S^3
-        food_pos : same for food coords
-        wall     : 4 cardinal direction bumps when near_wall, panic
-                   weighted by 1/energy
-        status   : uniform scalar background weighted by alive * energy
+        food_dir_local : food direction in snake's frame, lifted to S^3
+        head_pos       : head grid coords stereographic-projected to S^3
+        food_pos       : same for food coords
+        wall           : 4 cardinal bumps when near_wall, panic-weighted
+        status         : uniform background weighted by alive * energy
     """
     vertices = _get_geo()["vertices"]
     gs = grid_size
     f = np.zeros(120)
 
-    # Food direction (unit vector in plane)
+    # --- Channel A: world-frame food direction ---
+    # Embeds the absolute direction the food lies in. Aligns directly
+    # with the world-frame action geometry (UP/DOWN/LEFT/RIGHT).
     dx = float(signals.get("food_dx", 0.0))
     dy = float(signals.get("food_dy", 0.0))
     norm = math.sqrt(dx * dx + dy * dy)
@@ -226,6 +236,31 @@ def snake_signals_to_activation(signals, kappa=4.0, grid_size=10):
         q = _hopf_section_xyz(ux, uy, 0.0)
         dist = max(float(signals.get("dist_to_food", 1.0)), 1.0)
         f += _vmf_assign(q, vertices, kappa) * (1.0 / dist)
+
+    # --- Channel A': snake-local-frame food direction ---
+    # Same vector, expressed in the snake's heading frame. This is
+    # rotation-equivariant: a snake heading north with food to its
+    # right gives the same local-frame embedding as a snake heading
+    # east with food to its right. Augments the world-frame channel
+    # with relational information that helps the controller decide
+    # turn-vs-continue regardless of absolute orientation.
+    hx_h = float(signals.get("head_dx", 0.0))
+    hy_h = float(signals.get("head_dy", -1.0))
+    hnorm = math.sqrt(hx_h * hx_h + hy_h * hy_h)
+    if hnorm > 1e-6:
+        hx_h, hy_h = hx_h / hnorm, hy_h / hnorm
+    else:
+        hx_h, hy_h = 0.0, -1.0
+    dx_local = dx * hx_h + dy * hy_h
+    dy_local = -dx * hy_h + dy * hx_h
+    norm_local = math.sqrt(dx_local * dx_local + dy_local * dy_local)
+    if norm_local > 1e-6:
+        ulx, uly = dx_local / norm_local, dy_local / norm_local
+        # Lift into the upper hemisphere (z = +0.3) so it lands on
+        # different vertices than the world-frame channel above
+        q_local = _hopf_section_xyz(ulx * 0.95, uly * 0.95, 0.3)
+        dist = max(float(signals.get("dist_to_food", 1.0)), 1.0)
+        f += _vmf_assign(q_local, vertices, kappa) * (0.5 / dist)
 
     # Head position (stereographic to S^2)
     hx = float(signals.get("head_x", 0.0)) / max(gs - 1, 1) * 2.0 - 1.0
