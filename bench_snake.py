@@ -65,12 +65,17 @@ def make_population(size, controller_type, seed, signal_order, fitness="trust"):
         from genreg_controller import Controller
         from hopf_controller import HopfController
         from snake_hopf_controller import SnakeHopfController
+        from baseline_controllers import RandomController, GreedyController
         n_signals = len(signal_order)
         if controller_type == "snake_hopf":
             g.controller = SnakeHopfController(output_size=4, hidden_size=16)
         elif controller_type == "hopf":
             g.controller = HopfController(input_size=n_signals, hidden_size=16,
                                            output_size=4)
+        elif controller_type == "random":
+            g.controller = RandomController(output_size=4)
+        elif controller_type == "greedy":
+            g.controller = GreedyController(output_size=4)
         else:
             g.controller = Controller(input_size=n_signals, hidden_size=16,
                                        output_size=4)
@@ -117,8 +122,10 @@ def main():
     ap.add_argument("--smoke", action="store_true",
                     help="Smoke test: 1 seed, 5 gens, 10 pop")
     ap.add_argument("--controllers", type=str, nargs="+",
-                    default=["mlp", "hopf", "snake_hopf"],
-                    help="Which controller types to run head-to-head")
+                    default=["random", "greedy", "mlp", "hopf", "snake_hopf"],
+                    help="Which controller types to run head-to-head. "
+                         "random/greedy are fixed-policy baselines (no "
+                         "learning); the rest evolve.")
     ap.add_argument("--fitness", type=str, default="trust",
                     choices=["trust", "food"],
                     help="Selection criterion: trust (protein-network "
@@ -153,8 +160,8 @@ def main():
     mlp_params = count_params(Controller(n_sig, 16, 4))
     hopf_params = count_params(HopfController(n_sig, 16, 4))
     snakehopf_params = SnakeHopfController(output_size=4, hidden_size=16).n_params()
-    print(f"\nParameter counts: MLP={mlp_params}, Hopf={hopf_params}, "
-          f"SnakeHopf={snakehopf_params}")
+    print(f"\nParameter counts: random=0, greedy=0, MLP={mlp_params}, "
+          f"Hopf={hopf_params}, SnakeHopf={snakehopf_params}")
 
     controller_types = getattr(args, "controllers", ["mlp", "hopf", "snake_hopf"])
     results_by_seed = {ct: [] for ct in controller_types}
@@ -227,6 +234,7 @@ def main():
             "controllers": controller_types,
         },
         "param_counts": {
+            "random": 0, "greedy": 0,
             "mlp": mlp_params, "hopf": hopf_params,
             "snake_hopf": snakehopf_params,
         },
