@@ -150,37 +150,24 @@ def _vertex_cardinal_affinities():
 
 
 def _geometric_action_logits(activation, n_actions=4):
-    """Pure-geometry action logits (no learned params).
+    """Pure-geometry action logits, perfectly C_4-symmetric over the 4
+    cardinal actions.
 
-    Two contributions, summed:
-      1. Vertex-cardinal affinity: each vertex's activation contributes
-         to each cardinal action proportional to that vertex's Hopf-
-         projected cosine similarity with the action's S^2 target.
-      2. Hopf-decagon fiber strength: each of the 12 fibers' summed
-         activation contributes to its assigned cardinal action class
-         (assigned by xy-plane angle of the fiber axis).
+    The action logits come ENTIRELY from vertex-cardinal affinity:
+    each 600-cell vertex's Hopf projection on S^2 has a fixed cosine
+    similarity to each cardinal direction. Activation @ affinities
+    gives action logits.
 
-    Both are 4-fold-action-symmetric (the geometric prior treats the 4
-    cardinal actions on equal footing).
+    The Hopf-decagon prior was tried and found biased: with the
+    icosian generator (phi/2, 1/2, 1/(2 phi), 0), the 12 fiber
+    spectral axes happen to fall into 3 cardinal quadrants
+    (DOWN, LEFT, RIGHT) and miss UP entirely. Adding it as a
+    contribution made the prior asymmetric. The vertex-cardinal
+    affinity is symmetric by construction and doesn't have this
+    issue.
     """
-    # Contribution 1: vertex-cardinal affinity
     affinities = _vertex_cardinal_affinities()
-    affinity_logits = activation @ affinities  # (4,)
-
-    # Contribution 2: decagon fiber strength
-    if "orbits" not in _DECAGON_CACHE:
-        _decagon_action_map()
-    orbits = _DECAGON_CACHE["orbits"]
-    fiber_to_action, _ = _decagon_action_map()
-    fiber_strengths = np.zeros(12)
-    for f_idx in range(12):
-        for v_idx in orbits[f_idx]:
-            fiber_strengths[f_idx] += activation[v_idx]
-    fiber_logits = np.zeros(n_actions)
-    for f_idx in range(12):
-        fiber_logits[fiber_to_action[f_idx]] += fiber_strengths[f_idx]
-
-    return affinity_logits + 0.3 * fiber_logits
+    return activation @ affinities  # (4,)
 
 
 def _hopf_section_xyz(ux, uy, uz):
@@ -202,48 +189,41 @@ def _vmf_assign(q, vertices, kappa):
 
 
 def snake_signals_to_activation(signals, kappa=4.0, grid_size=10):
-    """Multi-channel directional embedding of Snake signals into a single
-    120-vertex activation on the 600-cell.
+    """Directional embedding of Snake signals into a single 120-vertex
+    activation on the 600-cell.
 
-    KEY IMPROVEMENT: food direction is expressed in the SNAKE'S LOCAL
-    FRAME (rotated by the snake's heading). This bakes rotational
-    equivariance into the input: a snake heading north with food to
-    its right and a snake heading east with food to its right give
-    the same local-frame food vector, so they get the same embedding.
-    Both controllers (MLP, Hopf, SnakeHopf) get to see this signal --
-    fair comparison; but the geometric controller's affinity to the
-    cardinal-action axes makes it especially well-suited to use it.
+    Design: the FOOD-DIRECTION channel dominates the activation. This
+    is what makes the geometric prior greedy-equivalent at init: the
+    activation peaks at vertices pointing toward the food, and the
+    vertex-cardinal-affinity readout maps that peak to the right
+    cardinal action.
 
-    Channels (all summed into a single (120,) activation):
-        food_dir_local : food direction in snake's frame, lifted to S^3
-        head_pos       : head grid coords stereographic-projected to S^3
-        food_pos       : same for food coords
-        wall           : 4 cardinal bumps when near_wall, panic-weighted
-        status         : uniform background weighted by alive * energy
+    Other channels (head/food position, wall danger, status) are
+    SECONDARY background contributions, weighted down so they
+    don't drown out the food signal. They give the readout extra
+    information the GA can use to refine the policy beyond pure
+    greedy (e.g., wall-avoidance, energy-aware decisions).
     """
     vertices = _get_geo()["vertices"]
     gs = grid_size
     f = np.zeros(120)
 
-    # --- Channel A: world-frame food direction ---
-    # Embeds the absolute direction the food lies in. Aligns directly
-    # with the world-frame action geometry (UP/DOWN/LEFT/RIGHT).
+    # --- DOMINANT channel: world-frame food direction ---
+    # Embeds the absolute direction the food lies in. Directly aligned
+    # with the world-frame action geometry (UP/DOWN/LEFT/RIGHT). Weight
+    # = 1 so this dominates the activation.
     dx = float(signals.get("food_dx", 0.0))
     dy = float(signals.get("food_dy", 0.0))
     norm = math.sqrt(dx * dx + dy * dy)
     if norm > 1e-6:
         ux, uy = dx / norm, dy / norm
         q = _hopf_section_xyz(ux, uy, 0.0)
-        dist = max(float(signals.get("dist_to_food", 1.0)), 1.0)
-        f += _vmf_assign(q, vertices, kappa) * (1.0 / dist)
+        f += _vmf_assign(q, vertices, kappa)  # weight = 1.0 (no /dist)
 
-    # --- Channel A': snake-local-frame food direction ---
-    # Same vector, expressed in the snake's heading frame. This is
-    # rotation-equivariant: a snake heading north with food to its
-    # right gives the same local-frame embedding as a snake heading
-    # east with food to its right. Augments the world-frame channel
-    # with relational information that helps the controller decide
-    # turn-vs-continue regardless of absolute orientation.
+    # --- Secondary: snake-local-frame food direction ---
+    # Lifted into upper hemisphere so it activates different vertices
+    # than the world-frame channel. Gives the GA a rotation-equivariant
+    # signal it can learn to weight.
     hx_h = float(signals.get("head_dx", 0.0))
     hy_h = float(signals.get("head_dy", -1.0))
     hnorm = math.sqrt(hx_h * hx_h + hy_h * hy_h)
@@ -256,40 +236,52 @@ def snake_signals_to_activation(signals, kappa=4.0, grid_size=10):
     norm_local = math.sqrt(dx_local * dx_local + dy_local * dy_local)
     if norm_local > 1e-6:
         ulx, uly = dx_local / norm_local, dy_local / norm_local
-        # Lift into the upper hemisphere (z = +0.3) so it lands on
-        # different vertices than the world-frame channel above
         q_local = _hopf_section_xyz(ulx * 0.95, uly * 0.95, 0.3)
-        dist = max(float(signals.get("dist_to_food", 1.0)), 1.0)
-        f += _vmf_assign(q_local, vertices, kappa) * (0.5 / dist)
+        f += _vmf_assign(q_local, vertices, kappa) * 0.2
 
-    # Head position (stereographic to S^2)
+    # Head position (stereographic to S^2) -- weight 0.05 (background only)
     hx = float(signals.get("head_x", 0.0)) / max(gs - 1, 1) * 2.0 - 1.0
     hy = float(signals.get("head_y", 0.0)) / max(gs - 1, 1) * 2.0 - 1.0
     r2 = hx * hx + hy * hy
     denom = 1.0 + r2
     X, Y, Z = 2 * hx / denom, 2 * hy / denom, (r2 - 1.0) / denom
-    f += _vmf_assign(_hopf_section_xyz(X, Y, Z), vertices, kappa) * 0.5
+    f += _vmf_assign(_hopf_section_xyz(X, Y, Z), vertices, kappa) * 0.05
 
-    # Food position
+    # Food position -- weight 0.05 (mostly redundant with food_dx/dy direction)
     fx = float(signals.get("food_x", 0.0)) / max(gs - 1, 1) * 2.0 - 1.0
     fy = float(signals.get("food_y", 0.0)) / max(gs - 1, 1) * 2.0 - 1.0
     r2f = fx * fx + fy * fy
     denomf = 1.0 + r2f
     Xf, Yf, Zf = 2 * fx / denomf, 2 * fy / denomf, (r2f - 1.0) / denomf
-    f += _vmf_assign(_hopf_section_xyz(Xf, Yf, Zf), vertices, kappa) * 0.5
+    f += _vmf_assign(_hopf_section_xyz(Xf, Yf, Zf), vertices, kappa) * 0.05
 
-    # Wall danger: 4 cardinal bumps, panic-weighted
+    # Wall danger: a single AVOIDANCE pulse pointing AWAY from the
+    # nearest wall. Encoded by negating activation in the wall-toward
+    # direction so the action prior shifts away. Triggered only when
+    # near_wall and panic-weighted by 1/energy.
     if float(signals.get("near_wall", 0.0)) > 0.5:
+        gs_f = max(gs - 1, 1)
+        hx_g = float(signals.get("head_x", 0.0)) / gs_f * 2.0 - 1.0
+        hy_g = float(signals.get("head_y", 0.0)) / gs_f * 2.0 - 1.0
+        # Direction TOWARD nearest wall
+        wall_x = +1.0 if hx_g > 0 else -1.0
+        wall_y = +1.0 if hy_g > 0 else -1.0
+        # Pick whichever axis is closest to a wall
+        if abs(hx_g) > abs(hy_g):
+            wall_dir = (wall_x, 0.0)
+        else:
+            wall_dir = (0.0, wall_y)
         energy = float(signals.get("energy", 25.0))
-        panic = 1.0 / max(1.0, energy)
-        for ax_x, ax_y in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)]:
-            f += _vmf_assign(_hopf_section_xyz(ax_x, ax_y, 0.0),
-                             vertices, kappa) * panic
+        panic = 0.3 / max(1.0, energy / 5.0)
+        # Subtract: discourage moving toward wall by suppressing
+        # activation in vertices pointing wall-ward
+        f -= _vmf_assign(_hopf_section_xyz(wall_dir[0], wall_dir[1], 0.0),
+                         vertices, kappa) * panic
 
-    # Status background
+    # Status background -- tiny so it doesn't affect anything
     energy_frac = float(signals.get("energy", 25.0)) / 25.0
     alive = float(signals.get("alive", 1.0))
-    f += np.full(120, (energy_frac * 0.5 + alive * 0.5) / 120.0)
+    f += np.full(120, (energy_frac * 0.5 + alive * 0.5) / 120.0) * 0.01
 
     return f
 
@@ -308,7 +300,7 @@ class SnakeHopfController:
     """
 
     def __init__(self, output_size=4, hidden_size=16, kappa=4.0, grid_size=10,
-                  alpha_init=1.0):
+                  alpha_init=1.0, readout_init_scale=0.05):
         self.output_size = output_size
         self.kappa = kappa
         self.grid_size = grid_size
@@ -316,6 +308,12 @@ class SnakeHopfController:
         # + readout. Inputs are 120 (we feed activation directly).
         self.hopf = HopfController(input_size=120, hidden_size=hidden_size,
                                     output_size=output_size)
+        # Scale down the random readout init so the geometric prior
+        # dominates at gen 0. The pure prior (W_out = 0) achieves
+        # ~96% of greedy's food count; we want gen 0 to start from
+        # there and have evolution add refinements (wall avoidance,
+        # energy-aware moves) on top, not flatten the prior with noise.
+        self.hopf.W_out *= readout_init_scale
         # Learnable mix weight: alpha * geometric_prior + readout_logits
         self.alpha = float(alpha_init)
 
