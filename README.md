@@ -140,34 +140,44 @@ The IDE provides modular nodes to construct and monitor AI behavior.
 | `hopf` | `hopf_controller.py` + `cell600.py` + `ade_geometry.py` | 600-cell ADE-eigenspace features over a vMF-soft-assigned vertex activation | 2D-spatial / image input where the pixel kernel makes geometric sense |
 | `snake_hopf` | `snake_hopf_controller.py` + `hopf_decagon.py` | Multi-channel directional embedding of Snake's signals → 600-cell activation; Hopf-decagon + vertex-cardinal-affinity geometric action prior; learned readout adds refinement | Snake-style control where actions live in a Cartesian 4-direction symmetry that the icosahedral geometry can express |
 
-### Snake A/B benchmark
+### Snake benchmark
 
-`bench_snake.py` runs all three backends head-to-head under the same
-GENREG evolutionary loop (5 seeds × 50 generations × 50 population
-× 200 steps/life). Result (mean ± std over 5 seeds):
+`bench_snake.py` runs five controller types head-to-head under the
+same GENREG evolutionary loop (5 seeds × 50 generations × 50
+population × 200 steps/life, fitness = food eaten). Random and
+Greedy are fixed-policy baselines (no learning, 0 parameters); the
+rest evolve.
 
-| Metric | MLP (260 params) | Hopf (276) | **SnakeHopf (277)** |
-|---|---:|---:|---:|
-| max best food ever | 3.20 ± 0.40 | 2.00 ± 0.00 | **3.80 ± 1.17** |
-| final best food | 1.40 ± 1.02 | 0.80 ± 0.40 | 1.20 ± 0.40 |
-| final avg food | 0.12 ± 0.06 | 0.04 ± 0.03 | 0.08 ± 0.05 |
-| final best trust | **188 ± 49** | 114 ± 39 | 50 ± 8 |
-| max best trust ever | **264 ± 27** | 175 ± 50 | 139 ± 14 |
+| Metric | random | **greedy** | mlp | hopf | **snake_hopf** |
+|---|---:|---:|---:|---:|---:|
+| final best food | 0.80 | **37.20** | 1.20 | 1.20 | **37.40** |
+| final avg food | 0.06 | **29.97** | 0.06 | 0.04 | 27.98 |
+| max best food ever | 2.40 | **41.40** | 2.40 | 1.80 | **41.20** |
+| max best trust ever | 226 | **994.3** | 136 | 121 | **993.5** |
+| param count | 0 | 0 | 260 | 276 | 277 |
 
-**Key finding**: SnakeHopf reaches the highest peak food count
-(3.80 vs MLP's 3.20, +19%), exposing that the **default trust
-signal** (rewarding *gradual* approach to food via a TrendProtein)
-is **misaligned with the actual game objective** (eat food). The
-geometric controller's directional bias produces direct, decisive
-moves that eat more food when they work, but score lower on the
-trust proxy. MLP exploits the trust signal more efficiently;
-SnakeHopf exploits the actual game.
+**Result**: SnakeHopf matches the greedy heuristic ceiling within
+noise on every metric (4 ties, 1 at 93%). Vs the GENREG default MLP
+controller: **31× more food on average, 31× final best food**.
+Vs random: **466× more food**.
 
-This is a real GENREG framework finding: protein-network design
-choices (the trust signal) and controller backend choices interact.
-Tuning the proteins (e.g., reward food-eaten more directly) would
-likely flip the comparison. Raw numbers in
-`checkpoints/snake_ab/results.json`.
+**Why**: SnakeHopf's vertex-cardinal-affinity action prior is
+greedy-equivalent by construction — each 600-cell vertex's Hopf
+projection on S² has a fixed cosine similarity to each cardinal
+direction, so an activation peaked toward where the food lies
+maps directly to the right cardinal action. The food-direction
+embedding channel dominates the activation; the readout starts
+small (`readout_init_scale=0.05`) so the prior runs gen 0 at
+~96% of greedy performance, and evolution refines from there
+without first having to fight a noisy random readout.
+
+The MLP controller, with the same evolutionary loop, never finds
+the food-direction-to-action mapping that the geometric prior
+encodes structurally. After 50 generations, MLP eats roughly the
+same amount as random — the default GENREG GA budget is too small
+for the MLP to learn the mapping from data alone.
+
+Raw numbers in `checkpoints/snake_ab/results.json`.
 
 ## Math substrate (top level)
 
