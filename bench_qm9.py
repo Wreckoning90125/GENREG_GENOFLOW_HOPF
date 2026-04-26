@@ -60,9 +60,35 @@ sys.path.insert(0, os.path.join(_ROOT, "experiments", "mnist_geometric"))
 from ade_geometry import get_ade
 from qm9_data import (
     load_qm9, get_splits, TARGET_INDICES, TARGET_UNITS,
+    ATOM_TYPES, ATOM_NUMBERS, N_ATOM_CHANNELS,
 )
 from mol_kernel import extract_molecular_features, coulomb_matrix_features
 from train_ade_hopf import ridge_regression_bias
+
+
+def compute_extensivity_features(all_coords, all_atoms):
+    """Per-molecule features that capture EXTENSIVITY (scale with
+    molecule size). The Hopf-angular features are intensive by
+    construction (vMF activations are normalized to sum=1); they
+    cannot represent properties like internal energy U0 or heat
+    capacity Cv that scale with N_atoms.
+
+    Channels (8 features per molecule):
+        0..4: count of each atom type (H, C, N, O, F)
+        5:    total atom count
+        6:    sum of atomic numbers (Z)
+        7:    sum of Z^2.4 (matches CM's diagonal scaling exactly)
+    """
+    n_mol = len(all_coords)
+    feats = np.zeros((n_mol, 8))
+    for i in range(n_mol):
+        atoms = all_atoms[i]
+        for ch_name, ch_idx in ATOM_TYPES.items():
+            feats[i, ch_idx] = sum(1 for a in atoms if a == ch_name)
+        feats[i, 5] = len(atoms)
+        feats[i, 6] = sum(ATOM_NUMBERS.get(a, 0) for a in atoms)
+        feats[i, 7] = sum(ATOM_NUMBERS.get(a, 0) ** 2.4 for a in atoms)
+    return feats
 
 
 def evaluate_mae(predictions, targets):
@@ -158,6 +184,20 @@ def main():
     print(f"  shape={X_signed_multi.shape}, time={time.time()-t0:.1f}s")
     feature_sets["hopf_signed_multi"] = X_signed_multi
 
+    print("\n[ext] extensivity-only baseline (8 features: atom counts + Z sums)...")
+    t0 = time.time()
+    EXT = compute_extensivity_features(coords, atoms)
+    print(f"  shape={EXT.shape}, time={time.time()-t0:.1f}s")
+    feature_sets["ext"] = EXT
+
+    print("\n[hopf_multi_ext] hopf_signed_multi + extensivity (8 extra dims)...")
+    feature_sets["hopf_multi_ext"] = np.hstack([X_signed_multi, EXT])
+    print(f"  shape={feature_sets['hopf_multi_ext'].shape}")
+
+    print("\n[cm_ext] CM + extensivity (controls for what extensivity adds to CM)...")
+    feature_sets["cm_ext"] = np.hstack([CM, EXT])
+    print(f"  shape={feature_sets['cm_ext'].shape}")
+
     # Standardize each
     standardized = {}
     for name, X in feature_sets.items():
@@ -167,7 +207,9 @@ def main():
     gc.collect()
 
     # === Per-property A/B ===
-    method_order = ["random", "cm", "hopf_abs", "hopf_signed", "hopf_signed_multi"]
+    method_order = ["random", "cm", "ext", "cm_ext",
+                    "hopf_abs", "hopf_signed", "hopf_signed_multi",
+                    "hopf_multi_ext"]
     print("\n" + "=" * 110)
     print("Per-property MAE (in native units; lower better)")
     print("=" * 110)
@@ -182,11 +224,10 @@ def main():
         y_test = props[test_idx, prop_idx]
 
         per_method = {}
-        # random
         mae_r, _ = random_predictor_mae(y_train, y_test)
         per_method["random"] = mae_r * unit_scale
-        # rest: linear ridge with alpha sweep
-        for name in ("cm", "hopf_abs", "hopf_signed", "hopf_signed_multi"):
+        for name in ("cm", "ext", "cm_ext", "hopf_abs", "hopf_signed",
+                     "hopf_signed_multi", "hopf_multi_ext"):
             mae, alpha = best_ridge_mae(
                 standardized[name][train_idx], y_train,
                 standardized[name][test_idx], y_test
@@ -214,18 +255,29 @@ def main():
               f"{ratio:>+13.2f}%")
 
     print("\n" + "=" * 110)
-    print(f"Geometric features vs CM baseline (negative = beat CM, positive = lose)")
+    print(f"Best method per property + ratio vs CM (negative = beats CM)")
     print("-" * 110)
-    print(f"{'property':<8} {'cm':>14} {'hopf_abs':>14} {'hopf_signed':>14} "
-          f"{'hopf_multi':>14}")
+    print(f"{'property':<8} {'best_method':<22} {'best_mae':>12} {'cm':>12} {'pct vs cm':>10}")
     for r in all_results:
-        d_abs = (r["hopf_abs"] - r["cm"]) / r["cm"] * 100
-        d_sgn = (r["hopf_signed"] - r["cm"]) / r["cm"] * 100
-        d_mlt = (r["hopf_signed_multi"] - r["cm"]) / r["cm"] * 100
-        print(f"{r['property']:<8} {r['cm']:>14.3f} "
-              f"{r['hopf_abs']:>13.3f}({d_abs:+.0f}%) "
-              f"{r['hopf_signed']:>13.3f}({d_sgn:+.0f}%) "
-              f"{r['hopf_signed_multi']:>13.3f}({d_mlt:+.0f}%)")
+        # exclude random from "best of"; it's the floor reference
+        candidates = {k: v for k, v in r.items()
+                      if k not in ("property", "unit", "random")}
+        best_name = min(candidates, key=lambda k: candidates[k])
+        best_mae = candidates[best_name]
+        pct = (best_mae - r["cm"]) / r["cm"] * 100
+        print(f"{r['property']:<8} {best_name:<22} "
+              f"{best_mae:>12.3f} {r['cm']:>12.3f} {pct:>+9.2f}%")
+
+    # Show what extensivity adds to CM and what hopf_multi+ext does
+    print("\n" + "=" * 110)
+    print(f"Extensivity contribution: ext alone, cm vs cm+ext, hopf_multi vs hopf_multi+ext")
+    print("-" * 110)
+    print(f"{'property':<8} {'ext':>10} {'cm':>10} {'cm+ext':>10} "
+          f"{'hopf_multi':>12} {'hopf_multi+ext':>15}")
+    for r in all_results:
+        print(f"{r['property']:<8} {r['ext']:>10.3f} {r['cm']:>10.3f} "
+              f"{r['cm_ext']:>10.3f} {r['hopf_signed_multi']:>12.3f} "
+              f"{r['hopf_multi_ext']:>15.3f}")
 
     out_path = os.path.join(args.out_dir, "results.json")
     with open(out_path, "w") as f:
