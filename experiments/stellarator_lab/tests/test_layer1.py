@@ -1,18 +1,33 @@
 """
-Layer 1 verification suite.
+Stellarator-lab math verification suite.
 
-Covers the three deliverables from RESEARCH_PROGRAM.md:
-    1. Seeds       -> seed_field / seed_vector_potential, grid sampling
-    2. Verification -> 600-cell second witness
-    3. Bundle diagnostics -> Berry-phase accumulation
+Verifies:
+    1. Seeds       -> closed-form generalized-Hopf field + analytic helicity
+    2. Verification -> 600-cell witness with machine-zero harmonic leak
+    3. Hodge stars -> closed-form circumcentric scalars, metric/comb ratio
+    4. Hopf decagon -> 12-fiber partition with C_10 invariance
+    5. Bundle diagnostics -> Berry-phase Pancharatnam vs Clifford agreement
 
-Tolerances are calibrated against empirical smoke-test behaviour of the
-current implementation; tighten them only after regressions are confirmed.
+Run from the repo root: `PYTHONPATH=. pytest experiments/stellarator_lab/tests/`
+
+The header below also injects the right paths so the suite runs from
+any cwd.
 """
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+# Inject paths so imports from cell600 (repo root) and hopf_seed (this
+# experiment dir) both resolve regardless of cwd.
+_HERE = Path(__file__).resolve().parent
+_LAB = _HERE.parent
+_REPO = _LAB.parent.parent
+for p in (str(_REPO), str(_LAB)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 import numpy as np
 import pytest

@@ -62,10 +62,12 @@ def make_population(size, controller_type, seed, signal_order):
     set_all_seeds(seed)
     pop = Population(size=size)
     for g in pop.genomes:
-        # Replace controller with the correct type
         from genreg_controller import Controller
         from hopf_controller import HopfController
-        if controller_type == "hopf":
+        from snake_hopf_controller import SnakeHopfController
+        if controller_type == "snake_hopf":
+            g.controller = SnakeHopfController(output_size=4, hidden_size=16)
+        elif controller_type == "hopf":
             g.controller = HopfController(input_size=11, hidden_size=16,
                                            output_size=4)
         else:
@@ -113,6 +115,9 @@ def main():
     ap.add_argument("--out-dir", type=str, default="checkpoints/snake_ab")
     ap.add_argument("--smoke", action="store_true",
                     help="Smoke test: 1 seed, 5 gens, 10 pop")
+    ap.add_argument("--controllers", type=str, nargs="+",
+                    default=["mlp", "hopf", "snake_hopf"],
+                    help="Which controller types to run head-to-head")
     args = ap.parse_args()
 
     if args.smoke:
@@ -133,18 +138,22 @@ def main():
     set_all_seeds(0)
     from genreg_controller import Controller
     from hopf_controller import HopfController
+    from snake_hopf_controller import SnakeHopfController
     mlp_params = count_params(Controller(11, 16, 4))
     hopf_params = count_params(HopfController(11, 16, 4))
-    print(f"\nParameter counts: MLP={mlp_params}, Hopf={hopf_params}")
+    snakehopf_params = SnakeHopfController(output_size=4, hidden_size=16).n_params()
+    print(f"\nParameter counts: MLP={mlp_params}, Hopf={hopf_params}, "
+          f"SnakeHopf={snakehopf_params}")
 
-    results_by_seed = {"mlp": [], "hopf": []}
+    controller_types = getattr(args, "controllers", ["mlp", "hopf", "snake_hopf"])
+    results_by_seed = {ct: [] for ct in controller_types}
 
     for seed in args.seeds:
         print(f"\n{'='*60}")
         print(f"SEED {seed}")
         print(f"{'='*60}")
 
-        for ctype in ["mlp", "hopf"]:
+        for ctype in controller_types:
             print(f"\n--- {ctype.upper()} controller ---")
             t0 = time.time()
             env = SnakeEnvironment(grid_size=10)
@@ -170,28 +179,32 @@ def main():
                   f"max_ever={final['max_best_food_ever']:.0f}")
 
     # === Aggregate across seeds ===
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 90)
     print("Aggregate results (mean +/- std across seeds)")
-    print("=" * 70)
-    print(f"{'metric':<22} {'MLP':>20} {'Hopf':>20}")
-    print("-" * 70)
+    print("=" * 90)
+    header = f"{'metric':<22}" + "".join(f"{ct:>22}" for ct in controller_types)
+    print(header)
+    print("-" * 90)
     for metric in ("final_best_trust", "final_avg_trust",
                    "final_best_food", "final_avg_food",
                    "max_best_food_ever", "max_best_trust_ever"):
-        m_vals = [r[metric] for r in results_by_seed["mlp"]]
-        h_vals = [r[metric] for r in results_by_seed["hopf"]]
-        m_mean, m_std = np.mean(m_vals), np.std(m_vals)
-        h_mean, h_std = np.mean(h_vals), np.std(h_vals)
-        delta = h_mean - m_mean
-        marker = ""
-        if metric.endswith("food") or metric.endswith("trust"):
-            if delta > m_std:
-                marker = "  <-- Hopf better"
-            elif delta < -m_std:
-                marker = "  <-- MLP better"
-        print(f"{metric:<22} "
-              f"{m_mean:>10.2f} +/- {m_std:>5.2f}  "
-              f"{h_mean:>10.2f} +/- {h_std:>5.2f}{marker}")
+        cols = [f"{metric:<22}"]
+        means = {}
+        for ct in controller_types:
+            vals = [r[metric] for r in results_by_seed[ct]]
+            mean, std = np.mean(vals), np.std(vals)
+            means[ct] = (mean, std)
+            cols.append(f"{mean:>13.2f} +/- {std:>5.2f}")
+        # Mark winner if it beats next-best by >1 sigma of next-best's std
+        sorted_ct = sorted(controller_types, key=lambda c: -means[c][0])
+        if len(sorted_ct) >= 2:
+            top_mean = means[sorted_ct[0]][0]
+            second_mean, second_std = means[sorted_ct[1]]
+            if (top_mean - second_mean) > second_std:
+                cols.append(f"  {sorted_ct[0]} wins")
+            else:
+                cols.append("  (within noise)")
+        print(" ".join(cols))
 
     out = {
         "config": {
@@ -199,8 +212,12 @@ def main():
             "n_generations": args.n_generations,
             "population_size": args.population_size,
             "steps_per_life": args.steps_per_life,
+            "controllers": controller_types,
         },
-        "param_counts": {"mlp": mlp_params, "hopf": hopf_params},
+        "param_counts": {
+            "mlp": mlp_params, "hopf": hopf_params,
+            "snake_hopf": snakehopf_params,
+        },
         "results_by_seed": results_by_seed,
     }
     out_path = os.path.join(args.out_dir, "results.json")

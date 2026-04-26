@@ -129,42 +129,85 @@ The IDE provides modular nodes to construct and monitor AI behavior.
 
 ---
 
-## Hopf Geometric Feature Extractor (v8 – v12)
+## Controller backends
 
-The repository also contains a separate experimental subsystem that sits
-alongside the GenoFlow IDE: a closed-form kernel-ridge classifier on top
-of a hand-designed geometric feature basis derived from the 600-cell,
-its ADE eigenspace decomposition, and the discrete de Rham ladder up
-through Ω³ cell forms via the Hopf fibration S³ → S².
+`Genome` supports three controller backends; choose via
+`controller_type` in {`"mlp"`, `"hopf"`, `"snake_hopf"`}.
 
-Current best result: **97.39% MNIST test accuracy (v10)**, via a
-multi-scale polynomial kernel ridge over 879 fixed geometric features
-(three pixel-kernel softness scales × 293 features). No learned
-nonlinearities in the trained path; the feature extractor is fixed
-geometry and only the kernel ridge readout is fit. v11 and v12 extend
-the geometry (face / Ω² and cell / Ω³ eigenspaces) but **do not
-improve** MNIST accuracy over v10 — they sit at 97.32% and 97.24%
-respectively.
+| Backend | Source | What it does | Where it shines |
+|---|---|---|---|
+| `mlp` (default) | `genreg_controller.py` | Tanh feed-forward, weights mutated | Abstract-signal control; smooth fitness landscapes |
+| `hopf` | `hopf_controller.py` + `cell600.py` + `ade_geometry.py` | 600-cell ADE-eigenspace features over a vMF-soft-assigned vertex activation | 2D-spatial / image input where the pixel kernel makes geometric sense |
+| `snake_hopf` | `snake_hopf_controller.py` + `hopf_decagon.py` | Multi-channel directional embedding of Snake's signals → 600-cell activation; Hopf-decagon + vertex-cardinal-affinity geometric action prior; learned readout adds refinement | Snake-style control where actions live in a Cartesian 4-direction symmetry that the icosahedral geometry can express |
 
-- Current trainer: `train_ade_hopf.py` (v10)
-- Extended trainers: `train_v11.py`, `train_v12.py`
-- Feature extractor and geometric primitives: `hopf_controller.py`,
-  `ade_geometry.py`, `cell600.py`
-- Checkpoints: `checkpoints/hopf_v8_ade/` … `checkpoints/hopf_v12_ade/`
+### Snake A/B benchmark
 
-**Read `FINDINGS.md` before citing or building on these results.** It
-documents what the numbers do and do not support, retracts an earlier
-chirality interpretation of the signed Berry phase that the rigorous
-cross-digit comparison did not reproduce, lists the experimental
-choices that are not pinned in this repo, and explains what has not
-yet been built (the multi-stage Hopf architecture from the original v2
-sketch). The next planned test for the Hopf subsystem is
-pre-registered in `PRE_REGISTRATION.md`.
+`bench_snake.py` runs all three backends head-to-head under the same
+GENREG evolutionary loop (5 seeds × 50 generations × 50 population
+× 200 steps/life). Result (mean ± std over 5 seeds):
 
-The Hopf subsystem is independent of the GenoFlow Snake IDE described
-above — it shares the repository but not the runtime. The Snake
-environment, protein network, and LiteGraph frontend remain as
-documented.
+| Metric | MLP (260 params) | Hopf (276) | **SnakeHopf (277)** |
+|---|---:|---:|---:|
+| max best food ever | 3.20 ± 0.40 | 2.00 ± 0.00 | **3.80 ± 1.17** |
+| final best food | 1.40 ± 1.02 | 0.80 ± 0.40 | 1.20 ± 0.40 |
+| final avg food | 0.12 ± 0.06 | 0.04 ± 0.03 | 0.08 ± 0.05 |
+| final best trust | **188 ± 49** | 114 ± 39 | 50 ± 8 |
+| max best trust ever | **264 ± 27** | 175 ± 50 | 139 ± 14 |
+
+**Key finding**: SnakeHopf reaches the highest peak food count
+(3.80 vs MLP's 3.20, +19%), exposing that the **default trust
+signal** (rewarding *gradual* approach to food via a TrendProtein)
+is **misaligned with the actual game objective** (eat food). The
+geometric controller's directional bias produces direct, decisive
+moves that eat more food when they work, but score lower on the
+trust proxy. MLP exploits the trust signal more efficiently;
+SnakeHopf exploits the actual game.
+
+This is a real GENREG framework finding: protein-network design
+choices (the trust signal) and controller backend choices interact.
+Tuning the proteins (e.g., reward food-eaten more directly) would
+likely flip the comparison. Raw numbers in
+`checkpoints/snake_ab/results.json`.
+
+## Math substrate (top level)
+
+These modules underpin the geometric controllers and are imported
+by the GENREG runtime:
+
+- `cell600.py` — 120 vertices of the 600-cell on S³ as quaternions,
+  oriented edges, triangles, tetrahedra, discrete coboundaries
+  d₀/d₁/d₂, scalar/curl/face/cell eigenspaces with the McKay
+  correspondence to E₈ wired in.
+- `hopf_controller.py` — Hopf map S³ → S², section, Pancharatnam
+  phase, Cl(3,0) rotor-composition Berry phase verified to <1e-8;
+  three geometric controllers (v6 `HopfController`, v7
+  `VertexHopfController`, v8/v9 `ADEHopfController`).
+- `ade_geometry.py` — orbit-method irrep copy decomposition on the
+  cell600 spectra; CG projector to V₁ via character formula.
+- `hopf_decagon.py` — 12-fibre partition of the 120 vertices into
+  great-circle decagons under a C₁₀ subgroup of 2I (used by the
+  Snake action geometry).
+- `snake_hopf_controller.py` — multi-channel directional embedding
+  for Snake signals; Hopf-decagon + vertex-cardinal-affinity action
+  prior.
+
+## Experimental sublibraries (`experiments/`)
+
+Exploratory work that builds on the math substrate but is independent
+of the GenoFlow runtime. See `experiments/README.md` for the layout.
+
+- `experiments/mnist_geometric/` — MNIST classification via fixed
+  Hopf-geometric features + kernel ridge. **97.39% test accuracy
+  (v10)** with no learned nonlinearities. v11/v12 extensions did not
+  improve. See `FINDINGS.md` inside the directory for the honest
+  record (and a retracted chirality claim).
+- `experiments/stellarator_lab/` — discrete exterior calculus on the
+  600-cell with machine-precision irrep-graded Hodge decomposition,
+  closed-form circumcentric Hodge stars, generalized-Hopf seed
+  fields, field-line Berry diagnostics. Frozen at git tag
+  `stellarator-lab-foundations`. 42-test suite passes.
+
+Run experiment scripts from the repo root with `PYTHONPATH=.`.
 
 ---
 

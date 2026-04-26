@@ -368,19 +368,15 @@ class HopfController:
 
         return energies
 
-    def forward(self, inputs):
-        """Forward pass: spectral → per-eigenspace Hopf → McKay → readout."""
+    def features_from_activation(self, f):
+        """Build the geometric feature vector from a 120-vertex activation
+        using the per-eigenspace Hopf projections + McKay message passing.
+
+        Exposed so other controllers (SnakeHopfController) can substitute
+        their own activation construction while reusing the eigenspace
+        machinery.
+        """
         geo = _get_geo()
-        kernel = _get_pixel_kernel(self.input_size)
-
-        # Project input onto 600-cell
-        x = np.asarray(inputs, dtype=np.float64)
-        if len(x) < self.input_size:
-            x = np.pad(x, (0, self.input_size - len(x)))
-        x = x[:self.input_size]
-        f = x @ kernel  # (120,)
-
-        # Spectral decomposition into 9 irreps + 4 curl modes
         sc = [es["vectors"].T @ f for es in geo["scalar_eigenspaces"]]
         df = geo["d0"] @ f
         cu = [es["vectors"].T @ df for es in geo["curl_eigenspaces"]]
@@ -394,7 +390,6 @@ class HopfController:
             norms.append(norm)
 
             if self.sc_rotors[i] is not None:
-                # Hopf project first 4D with learned rotor
                 c4 = coeffs[:4]
                 n4 = np.linalg.norm(c4)
                 if n4 > 1e-10:
@@ -406,7 +401,6 @@ class HopfController:
                 else:
                     features.extend([0.0, 0.0, 0.0])
             else:
-                # dim < 4: Poincaré-warped scalar
                 features.append(poincare_warp_scalar(coeffs[0]))
 
         # --- McKay message passing on eigenspace norms ---
@@ -432,7 +426,17 @@ class HopfController:
                 features.extend([0.0, 0.0, 0.0])
             features.append(poincare_warp_scalar(norm))
 
-        features = np.array(features)
+        return np.array(features)
+
+    def forward(self, inputs):
+        """Forward pass: pixel kernel → activation → features → readout."""
+        kernel = _get_pixel_kernel(self.input_size)
+        x = np.asarray(inputs, dtype=np.float64)
+        if len(x) < self.input_size:
+            x = np.pad(x, (0, self.input_size - len(x)))
+        x = x[:self.input_size]
+        f = x @ kernel  # (120,)
+        features = self.features_from_activation(f)
         logits = self.W_out @ features + self.b_out
         return logits.tolist()
 
