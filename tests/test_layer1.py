@@ -434,3 +434,164 @@ def test_metric_to_combinatorial_eigenvalue_ratio_is_exact():
         assert abs(ratio - expected_ratio) < 1e-12, (
             f"isotypic eigenvalue ratio {ratio} != expected {expected_ratio}"
         )
+
+
+# -----------------------------------------------------------------------------
+# Stage 2: discrete Hopf decagon decomposition (12 fibres of 10 vertices).
+# -----------------------------------------------------------------------------
+
+def test_decagon_generator_has_quaternion_order_10():
+    """The chosen icosian (phi/2, 1/2, 1/(2 phi), 0) has order 10 under
+    quaternion multiplication: q^10 == 1 to machine precision, q^k != 1
+    for any k in {1, ..., 9}."""
+    import math
+    import numpy as np
+    from hopf_controller import qmul
+    from hopf_decagon import find_order_10_generator, quaternion_order
+    _, q = find_order_10_generator()
+    assert quaternion_order(q) == 10
+    # Direct verification of q.w == cos(pi/5) == phi/2
+    phi = (1 + math.sqrt(5)) / 2
+    assert abs(q[0] - phi / 2) < 1e-12
+    assert abs(q[0] - math.cos(math.pi / 5)) < 1e-12
+    # And spatial magnitude == sin(pi/5)
+    spatial_mag = float(np.linalg.norm(q[1:]))
+    assert abs(spatial_mag - math.sin(math.pi / 5)) < 1e-12
+
+
+def test_decagon_partition_partitions_120_vertices():
+    """The 12 cosets of <g> in 2I form a disjoint partition of the 120
+    vertices, with each orbit of size exactly 10."""
+    import numpy as np
+    from hopf_decagon import hopf_decagon_partition, fiber_label
+
+    orbits, _, _ = hopf_decagon_partition()
+    assert orbits.shape == (12, 10)
+    # Disjoint
+    flat = orbits.flatten()
+    assert len(flat) == 120
+    assert sorted(flat.tolist()) == list(range(120))
+    # Fibre label sanity
+    labels = fiber_label(orbits)
+    assert (labels >= 0).all()
+    counts = np.bincount(labels, minlength=12)
+    assert (counts == 10).all()
+
+
+def test_decagon_adjacent_vertices_are_at_edge_arc_pi_over_5():
+    """Adjacent vertices in each orbit are at angular distance pi/5
+    (the 600-cell edge arc)."""
+    import math
+    import numpy as np
+    from cell600 import get_geometry
+    from hopf_decagon import hopf_decagon_partition
+
+    verts = get_geometry()["vertices"]
+    orbits, _, _ = hopf_decagon_partition()
+    target = math.cos(math.pi / 5)
+    for orbit in orbits:
+        for k in range(10):
+            v = verts[orbit[k]]
+            w = verts[orbit[(k + 1) % 10]]
+            dot = float(np.dot(v, w))
+            assert abs(dot - target) < 1e-12, (
+                f"adjacent dot product {dot} != cos(pi/5)={target}"
+            )
+
+
+def test_decagon_adjacent_pairs_are_600cell_edges():
+    """Every adjacent (v_k, v_{k+1}) pair in every orbit is in the
+    600-cell edge list (so the discrete Hopf fibres are sub-walks of
+    the 1-skeleton, not arbitrary great-circle arcs)."""
+    from cell600 import get_geometry
+    from hopf_decagon import hopf_decagon_partition
+
+    edges = get_geometry()["edges"]
+    edge_set = set(frozenset((int(i), int(j))) for (i, j) in edges)
+    orbits, _, _ = hopf_decagon_partition()
+    for orbit in orbits:
+        for k in range(10):
+            pair = frozenset((int(orbit[k]), int(orbit[(k + 1) % 10])))
+            assert pair in edge_set, f"{pair} is not a 600-cell edge"
+
+
+def test_hopf_1_cochain_has_120_nonzero_entries():
+    """The Hopf 1-cochain has exactly 120 nonzero entries (= 12 fibres
+    times 10 fibre edges per fibre); the remaining 600 entries are
+    zero (inter-fibre edges)."""
+    import numpy as np
+    from hopf_decagon import hopf_decagon_partition, hopf_1_cochain
+
+    orbits, _, _ = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    assert A.shape == (720,)
+    nonzero = int(np.sum(np.abs(A) > 0.5))
+    assert nonzero == 120, f"expected 120 nonzero, got {nonzero}"
+    # All nonzero entries are exactly +/-1
+    assert (np.abs(np.abs(A[np.abs(A) > 0.5]) - 1.0) < 1e-15).all()
+
+
+def test_hopf_1_cochain_integrates_to_10_per_fiber():
+    """Forward integration of A_hopf around each of the 12 fibres
+    gives exactly 10 (the fibre length, since each forward fibre edge
+    contributes +1 in the C_10 direction)."""
+    from hopf_decagon import (
+        hopf_decagon_partition,
+        hopf_1_cochain,
+        integrate_along_fiber,
+    )
+
+    orbits, _, _ = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    for fid in range(12):
+        total = integrate_along_fiber(A, orbits[fid])
+        assert abs(total - 10.0) < 1e-12, (
+            f"fibre {fid} integral = {total}, expected 10"
+        )
+
+
+def test_hopf_1_cochain_is_C10_invariant_machine_zero():
+    """The Hopf 1-cochain is exactly invariant under the C_10 action of
+    the chosen generator g: rho_edges(g) . A_hopf = A_hopf to machine
+    precision. This is the structural symmetry of the discrete Hopf
+    fibration -- the C_10 action permutes fibre edges within each
+    fibre but preserves the cochain.
+
+    NOT invariant under the full 2I (different 2I elements map between
+    different generator-equivalent Hopf 1-cochains); the right
+    symmetry group for A_hopf is the cyclic <g>.
+    """
+    import numpy as np
+    from hopf_decagon import (
+        hopf_decagon_partition,
+        hopf_1_cochain,
+        edge_signed_action,
+    )
+
+    orbits, _, gen = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    P = edge_signed_action(gen)
+    leak = float(np.max(np.abs(P @ A - A)))
+    assert leak < 1e-14, (
+        f"C_10 invariance leak {leak} not at machine precision"
+    )
+
+
+def test_decagon_total_fiber_edges_plus_inter_fiber_edges_is_720():
+    """Sanity accounting: 120 fibre edges + 600 inter-fibre edges = 720
+    total edges. Each vertex has valence 12 in the 600-cell, of which
+    2 are within-fibre (predecessor + successor in C_10) and 10 are
+    between fibres."""
+    from hopf_decagon import (
+        hopf_decagon_partition,
+        hopf_1_cochain,
+    )
+    import numpy as np
+
+    orbits, _, _ = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    fibre_edge_count = int(np.sum(np.abs(A) > 0.5))
+    inter_edge_count = int(np.sum(np.abs(A) <= 0.5))
+    assert fibre_edge_count == 120
+    assert inter_edge_count == 600
+    assert fibre_edge_count + inter_edge_count == 720
