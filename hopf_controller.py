@@ -244,7 +244,21 @@ def _get_geo():
     return _GEO
 
 
-def _build_pixel_kernel(input_size, kappa=10.0):
+def _build_pixel_kernel(input_size, kappa=10.0, use_abs=True):
+    """Pixel-position-to-vertex projection kernel for MNIST-style inputs.
+
+    Each pixel position (px, py) is mapped onto S^2 via stereographic
+    projection, lifted to S^3 via the Hopf section, and soft-assigned
+    to the 120 vertices of the 600-cell.
+
+    use_abs: if True (default, backward-compatible with v8-v12), uses
+        |pixel_quat . vertex| in the soft-assign; collapses the spinor
+        double cover (q ~ -q) and identifies antipodal vertices.
+        Effectively halves the projection's resolution from 120 to 60
+        unique vertex assignments.
+        If False, uses signed dots; preserves the full 120-vertex 2I
+        structure and gives strictly more resolution.
+    """
     geo = _get_geo()
     vertices = geo["vertices"]
     rows, cols = (28, 28) if input_size == 784 else (
@@ -265,19 +279,23 @@ def _build_pixel_kernel(input_size, kappa=10.0):
         pixel_quats.append(q / np.linalg.norm(q))
 
     pixel_quats = np.array(pixel_quats)
-    dots = np.abs(pixel_quats @ vertices.T)
+    raw = pixel_quats @ vertices.T
+    dots = np.abs(raw) if use_abs else raw
     scaled = kappa * dots - (kappa * dots).max(axis=1, keepdims=True)
     exp_s = np.exp(scaled)
     return (exp_s / exp_s.sum(axis=1, keepdims=True)).astype(np.float64)
 
 
 _PIXEL_KAPPA = None
+_PIXEL_USE_ABS = None
 
-def _get_pixel_kernel(input_size, kappa=10.0):
-    global _PIXEL_KERNEL, _PIXEL_KAPPA
-    if _PIXEL_KERNEL is None or _PIXEL_KERNEL.shape[0] != input_size or _PIXEL_KAPPA != kappa:
-        _PIXEL_KERNEL = _build_pixel_kernel(input_size, kappa)
+def _get_pixel_kernel(input_size, kappa=10.0, use_abs=True):
+    global _PIXEL_KERNEL, _PIXEL_KAPPA, _PIXEL_USE_ABS
+    if (_PIXEL_KERNEL is None or _PIXEL_KERNEL.shape[0] != input_size
+            or _PIXEL_KAPPA != kappa or _PIXEL_USE_ABS != use_abs):
+        _PIXEL_KERNEL = _build_pixel_kernel(input_size, kappa, use_abs=use_abs)
         _PIXEL_KAPPA = kappa
+        _PIXEL_USE_ABS = use_abs
     return _PIXEL_KERNEL
 
 
