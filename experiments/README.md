@@ -9,14 +9,20 @@ not part of the deployable IDE.
 ## `mnist_geometric/`
 
 MNIST classification via fixed Hopf-geometric features + kernel ridge.
-Headline: **97.39% test accuracy** (v10) with no learned
-nonlinearities. v11/v12 extensions did not improve on v10.
-See `FINDINGS.md` for the honest record (including a retracted
-chirality claim from earlier iterations).
+
+Pre-audit headline (broken-baseline): **97.39% test accuracy** (v10).
+Post-audit (chirality + perms fixes in the math substrate at repo
+root): **97.86% kernel ridge, 97.23% linear ridge** on the same
+trainer. v11/v12 extensions still don't add measurable signal beyond
+the substrate fix. See `FINDINGS.md` for the addendum + the original
+chirality-claim retraction. The top-level `bench_mnist_chirality.py`
+runs the controlled A/B that establishes the +0.50 pp / +2.02 pp
+deltas.
 
 Run from the repo root:
 ```
 PYTHONPATH=. python experiments/mnist_geometric/train_ade_hopf.py
+PYTHONPATH=. python bench_mnist_chirality.py            # A/B harness
 ```
 
 ## `stellarator_lab/`

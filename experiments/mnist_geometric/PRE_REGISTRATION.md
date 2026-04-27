@@ -13,6 +13,16 @@ file before the first training run. Any deviation from the committed
 version, once a run has started, requires a new commit that explicitly
 amends this document and notes the reason.
 
+**Audit note.** Two setup bugs in the math substrate that this
+pre-registration's baseline number depends on (v10 = 97.39%) were
+found later: chirality / spinor double cover in the pixel kernel,
+and group-action permutation table corruption in
+`ade_geometry.perms`. Both are now fixed at the substrate level;
+the corrected baseline on the same trainer is 97.86% kernel ridge,
+97.23% linear ridge. Any concrete run of the test below should
+re-pin the baseline reference against the corrected substrate
+before win/loss claims. See `FINDINGS.md` addendum.
+
 ## What is being tested
 
 The question: does a **multi-stage Hopf architecture** — the design

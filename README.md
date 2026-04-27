@@ -201,16 +201,54 @@ by the GENREG runtime:
   for Snake signals; Hopf-decagon + vertex-cardinal-affinity action
   prior.
 
+## Top-level benchmarks (`bench_*.py`)
+
+Three end-to-end benchmarks of the geometric machinery:
+
+- **`bench_snake.py`** — controller A/B on Snake (table above)
+- **`bench_qm9.py`** — QM9 molecular property prediction; CoM-centered
+  Hopf features ± chirality fix ± extensivity channel, vs Random,
+  Coulomb Matrix (CM), and CM+ext baselines. Multi-scale signed
+  Hopf + extensivity beats CM on **5/7 properties**; alpha drops
+  52%, gap drops 19%, homo drops 16%. Two extensive properties
+  (U0, Cv) lose to CM+ext at this configuration.
+- **`bench_qm9_local.py`** — QM9 atom-centered (`mol_kernel_local.py`,
+  SOAP-on-the-600-cell variant). With chirality fix + extensivity
+  vs CM+ext: **6/7 properties win**, including Cv (-26%) which the
+  CoM-centered version lost on. Headline numbers at 10k molecules:
+
+  | Property | CM+ext | local_signed+ext | win vs CM+ext |
+  |---|---:|---:|---:|
+  | gap | 777 meV | **632** | **−19%** |
+  | homo | 387 meV | **310** | **−20%** |
+  | lumo | 650 meV | **563** | **−13%** |
+  | mu | 0.96 D | **0.76** | **−21%** |
+  | alpha | 1.73 Bohr³ | **1.43** | **−17%** |
+  | Cv | 0.97 cal/(mol K) | **0.72** | **−26%** |
+  | U0 | **602** meV | 1842 | (loses) |
+
+- **`bench_mnist_chirality.py`** — exposes the chirality / perms
+  setup-bug fixes on MNIST. Same multi-scale ADE feature extractor
+  as the v10 published baseline, only `np.abs` removed and the
+  group-action permutations corrected:
+
+  | Mode | Linear ridge | Kernel ridge (Nystrom poly deg 2) |
+  |---|---:|---:|
+  | original (v10 default) | 95.21% | 97.32% |
+  | + chirality + perms fix | **97.23%** (+2.02 pp) | **97.82%** (+0.50 pp) |
+
+  The v10 published number was 97.39%; with both setup bugs fixed
+  it's 97.82% on the same multi-scale features.
+
 ## Experimental sublibraries (`experiments/`)
 
-Exploratory work that builds on the math substrate but is independent
-of the GenoFlow runtime. See `experiments/README.md` for the layout.
+Self-contained sub-trees that share the math substrate but are
+independent of the GenoFlow runtime. See `experiments/README.md`.
 
-- `experiments/mnist_geometric/` — MNIST classification via fixed
-  Hopf-geometric features + kernel ridge. **97.39% test accuracy
-  (v10)** with no learned nonlinearities. v11/v12 extensions did not
-  improve. See `FINDINGS.md` inside the directory for the honest
-  record (and a retracted chirality claim).
+- `experiments/mnist_geometric/` — the original v6-v12 MNIST
+  trainers. v10 published as 97.39%; with the chirality + perms
+  setup-bug fixes (in this repo's top-level math files) the same
+  trainer produces 97.82%. See `FINDINGS.md`.
 - `experiments/stellarator_lab/` — discrete exterior calculus on the
   600-cell with machine-precision irrep-graded Hodge decomposition,
   closed-form circumcentric Hodge stars, generalized-Hopf seed
