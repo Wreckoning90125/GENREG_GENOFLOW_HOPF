@@ -151,10 +151,16 @@ def extract_atom_centered_features(all_coords, all_atoms, ade,
     rbf_centers, gamma = gaussian_rbf_centers(rbf_min, rbf_max, n_rbf, rbf_gamma)
     n_mol = len(all_coords)
     n_combos = len(kappas) * N_CH * n_rbf
-    n_feat = 293 * n_combos
+
+    # Probe the feature width once with a small dummy F matrix. Used to
+    # be hardcoded at 293 (the v8/v9 design with ~50 cg_v1 projections);
+    # after the ade_geometry perms fix it's 535. Safer to query.
+    probe_F = np.zeros((1, 120))
+    n_feat_per_combo = extract_features_from_F(probe_F, ade).shape[1]
+    n_feat = n_feat_per_combo * n_combos
     print(f"  Atom-centered features: {len(kappas)} kappas x {N_CH} channels "
           f"x {n_rbf} RBFs = {n_combos} combos, "
-          f"expect {n_feat} features/mol")
+          f"{n_feat_per_combo} feats/combo, expect {n_feat} features/mol")
     print(f"  Chunk size: {chunk_size}, estimated memory: "
           f"{n_mol * n_feat * 4 / 1e9:.1f} GB (float32)")
 
@@ -177,12 +183,12 @@ def extract_atom_centered_features(all_coords, all_atoms, ade,
             for ch in range(N_CH):
                 for r in range(n_rbf):
                     combo_idx = ki * (N_CH * n_rbf) + ch * n_rbf + r
-                    col_start = combo_idx * 293
-                    col_end = col_start + 293
+                    col_start = combo_idx * n_feat_per_combo
+                    col_end = col_start + n_feat_per_combo
 
                     F = np.array([chunk_acts[i][ch, r]
                                   for i in range(n_chunk)])  # (n_chunk, 120)
-                    feats = extract_features_from_F(F, ade)  # (n_chunk, 293)
+                    feats = extract_features_from_F(F, ade)  # (n_chunk, F)
                     X_all[start:end, col_start:col_end] = feats.astype(np.float32)
 
             del chunk_acts
