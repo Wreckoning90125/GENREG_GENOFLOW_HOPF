@@ -127,8 +127,6 @@ The IDE provides modular nodes to construct and monitor AI behavior.
 
 ---
 
----
-
 ## Controller backends
 
 `Genome` supports three controller backends; choose via
