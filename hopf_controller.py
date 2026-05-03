@@ -244,7 +244,21 @@ def _get_geo():
     return _GEO
 
 
-def _build_pixel_kernel(input_size, kappa=10.0):
+def _build_pixel_kernel(input_size, kappa=10.0, use_abs=True):
+    """Pixel-position-to-vertex projection kernel for MNIST-style inputs.
+
+    Each pixel position (px, py) is mapped onto S^2 via stereographic
+    projection, lifted to S^3 via the Hopf section, and soft-assigned
+    to the 120 vertices of the 600-cell.
+
+    use_abs: if True (default, backward-compatible with v8-v12), uses
+        |pixel_quat . vertex| in the soft-assign; collapses the spinor
+        double cover (q ~ -q) and identifies antipodal vertices.
+        Effectively halves the projection's resolution from 120 to 60
+        unique vertex assignments.
+        If False, uses signed dots; preserves the full 120-vertex 2I
+        structure and gives strictly more resolution.
+    """
     geo = _get_geo()
     vertices = geo["vertices"]
     rows, cols = (28, 28) if input_size == 784 else (
@@ -265,19 +279,23 @@ def _build_pixel_kernel(input_size, kappa=10.0):
         pixel_quats.append(q / np.linalg.norm(q))
 
     pixel_quats = np.array(pixel_quats)
-    dots = np.abs(pixel_quats @ vertices.T)
+    raw = pixel_quats @ vertices.T
+    dots = np.abs(raw) if use_abs else raw
     scaled = kappa * dots - (kappa * dots).max(axis=1, keepdims=True)
     exp_s = np.exp(scaled)
     return (exp_s / exp_s.sum(axis=1, keepdims=True)).astype(np.float64)
 
 
 _PIXEL_KAPPA = None
+_PIXEL_USE_ABS = None
 
-def _get_pixel_kernel(input_size, kappa=10.0):
-    global _PIXEL_KERNEL, _PIXEL_KAPPA
-    if _PIXEL_KERNEL is None or _PIXEL_KERNEL.shape[0] != input_size or _PIXEL_KAPPA != kappa:
-        _PIXEL_KERNEL = _build_pixel_kernel(input_size, kappa)
+def _get_pixel_kernel(input_size, kappa=10.0, use_abs=True):
+    global _PIXEL_KERNEL, _PIXEL_KAPPA, _PIXEL_USE_ABS
+    if (_PIXEL_KERNEL is None or _PIXEL_KERNEL.shape[0] != input_size
+            or _PIXEL_KAPPA != kappa or _PIXEL_USE_ABS != use_abs):
+        _PIXEL_KERNEL = _build_pixel_kernel(input_size, kappa, use_abs=use_abs)
         _PIXEL_KAPPA = kappa
+        _PIXEL_USE_ABS = use_abs
     return _PIXEL_KERNEL
 
 
@@ -368,19 +386,15 @@ class HopfController:
 
         return energies
 
-    def forward(self, inputs):
-        """Forward pass: spectral → per-eigenspace Hopf → McKay → readout."""
+    def features_from_activation(self, f):
+        """Build the geometric feature vector from a 120-vertex activation
+        using the per-eigenspace Hopf projections + McKay message passing.
+
+        Exposed so other controllers (SnakeHopfController) can substitute
+        their own activation construction while reusing the eigenspace
+        machinery.
+        """
         geo = _get_geo()
-        kernel = _get_pixel_kernel(self.input_size)
-
-        # Project input onto 600-cell
-        x = np.asarray(inputs, dtype=np.float64)
-        if len(x) < self.input_size:
-            x = np.pad(x, (0, self.input_size - len(x)))
-        x = x[:self.input_size]
-        f = x @ kernel  # (120,)
-
-        # Spectral decomposition into 9 irreps + 4 curl modes
         sc = [es["vectors"].T @ f for es in geo["scalar_eigenspaces"]]
         df = geo["d0"] @ f
         cu = [es["vectors"].T @ df for es in geo["curl_eigenspaces"]]
@@ -394,7 +408,6 @@ class HopfController:
             norms.append(norm)
 
             if self.sc_rotors[i] is not None:
-                # Hopf project first 4D with learned rotor
                 c4 = coeffs[:4]
                 n4 = np.linalg.norm(c4)
                 if n4 > 1e-10:
@@ -406,7 +419,6 @@ class HopfController:
                 else:
                     features.extend([0.0, 0.0, 0.0])
             else:
-                # dim < 4: Poincaré-warped scalar
                 features.append(poincare_warp_scalar(coeffs[0]))
 
         # --- McKay message passing on eigenspace norms ---
@@ -432,7 +444,17 @@ class HopfController:
                 features.extend([0.0, 0.0, 0.0])
             features.append(poincare_warp_scalar(norm))
 
-        features = np.array(features)
+        return np.array(features)
+
+    def forward(self, inputs):
+        """Forward pass: pixel kernel → activation → features → readout."""
+        kernel = _get_pixel_kernel(self.input_size)
+        x = np.asarray(inputs, dtype=np.float64)
+        if len(x) < self.input_size:
+            x = np.pad(x, (0, self.input_size - len(x)))
+        x = x[:self.input_size]
+        f = x @ kernel  # (120,)
+        features = self.features_from_activation(f)
         logits = self.W_out @ features + self.b_out
         return logits.tolist()
 

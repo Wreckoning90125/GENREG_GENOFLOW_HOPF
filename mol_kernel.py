@@ -76,12 +76,19 @@ def hopf_section_batch(points_s2):
 # Von-Mises-Fisher soft assignment to 600-cell vertices
 # ================================================================
 
-def vmf_soft_assign(quats, kappa):
+def vmf_soft_assign(quats, kappa, use_abs=True):
     """Compute soft assignment of quaternions to 600-cell vertices.
 
     Args:
         quats: (N, 4) array of unit quaternions
         kappa: concentration parameter (higher = sharper assignment)
+        use_abs: if True (default, backward-compatible), uses |q . v| so
+            antipodal vertices q and -q get identical weight (collapses
+            120 vertices to 60 antipodal pairs; throws away the spinor
+            double cover, hence chirality information). If False, uses
+            signed q . v so the assignment treats q and -q as distinct
+            (preserves the full 120-vertex 2I structure and resolves
+            chirality).
 
     Returns:
         (N, 120) soft assignment matrix (rows sum to 1)
@@ -89,8 +96,12 @@ def vmf_soft_assign(quats, kappa):
     geo = _get_geo()
     vertices = geo["vertices"]  # (120, 4)
 
-    # Quaternion inner product (absolute value for double cover)
-    dots = np.abs(quats @ vertices.T)  # (N, 120)
+    # Quaternion inner product. Absolute value collapses the spinor
+    # double cover (q ~ -q under SO(3)) -- this was the original
+    # behaviour but it also collapses chirality. Signed version below
+    # keeps q and -q distinct, resolving chirality.
+    raw = quats @ vertices.T  # (N, 120)
+    dots = np.abs(raw) if use_abs else raw
 
     # Softmax with numerical stability
     scaled = kappa * dots - (kappa * dots).max(axis=1, keepdims=True)
@@ -102,7 +113,8 @@ def vmf_soft_assign(quats, kappa):
 # Single molecule -> vertex activations
 # ================================================================
 
-def molecule_to_vertex_activations(coords, atom_symbols, kappa=5.5, sigma=1.0):
+def molecule_to_vertex_activations(coords, atom_symbols, kappa=5.5, sigma=1.0,
+                                    use_abs=True):
     """Convert one molecule to multi-channel 600-cell vertex activations.
 
     Args:
@@ -111,6 +123,10 @@ def molecule_to_vertex_activations(coords, atom_symbols, kappa=5.5, sigma=1.0):
         atom_symbols: list of element symbols (e.g., ['C', 'H', 'H', ...])
         kappa: angular concentration parameter for von-Mises-Fisher kernel
         sigma: radial scale parameter in Angstroms
+        use_abs: if True (default), use |q . v| in the vMF kernel
+            (chirality-blind, original behaviour). If False, use signed
+            q . v (chirality-resolving; preserves the full 120-vertex
+            structure of 2I rather than collapsing to 60 antipodal pairs).
 
     Returns:
         (N_ATOM_CHANNELS, 120) array of vertex activations, one channel
@@ -143,7 +159,7 @@ def molecule_to_vertex_activations(coords, atom_symbols, kappa=5.5, sigma=1.0):
 
         # Lift to S^3 and soft-assign to 600-cell vertices
         quats = hopf_section_batch(directions)
-        soft_assign = vmf_soft_assign(quats, kappa)  # (n_dir, 120)
+        soft_assign = vmf_soft_assign(quats, kappa, use_abs=use_abs)  # (n_dir, 120)
 
         # Accumulate per channel
         dir_indices = np.where(has_direction)[0]
@@ -167,13 +183,15 @@ def molecule_to_vertex_activations(coords, atom_symbols, kappa=5.5, sigma=1.0):
 # Batch: all molecules -> feature matrix
 # ================================================================
 
-def batch_vertex_activations(all_coords, all_atoms, kappa=5.5, sigma=1.0):
+def batch_vertex_activations(all_coords, all_atoms, kappa=5.5, sigma=1.0,
+                              use_abs=True):
     """Compute vertex activations for a batch of molecules.
 
     Args:
         all_coords: list of (N_atoms, 3) arrays
         all_atoms: list of lists of element symbols
         kappa, sigma: kernel parameters
+        use_abs: passed through to molecule_to_vertex_activations.
 
     Returns:
         List of N_ATOM_CHANNELS (N_molecules, 120) arrays, one per channel.
@@ -190,7 +208,8 @@ def batch_vertex_activations(all_coords, all_atoms, kappa=5.5, sigma=1.0):
         coords -= coords.mean(axis=0)
 
         act = molecule_to_vertex_activations(
-            coords, all_atoms[mol_i], kappa, sigma)  # (N_ATOM_CHANNELS, 120)
+            coords, all_atoms[mol_i], kappa, sigma,
+            use_abs=use_abs)  # (N_ATOM_CHANNELS, 120)
 
         for ch in range(N_ATOM_CHANNELS):
             channel_arrays[ch][mol_i] = act[ch]
@@ -200,7 +219,8 @@ def batch_vertex_activations(all_coords, all_atoms, kappa=5.5, sigma=1.0):
 
 def extract_molecular_features(all_coords, all_atoms, ade,
                                 kappas=(3.0, 5.5, 8.0),
-                                sigmas=(0.5, 1.0, 2.0)):
+                                sigmas=(0.5, 1.0, 2.0),
+                                use_abs=True):
     """Full feature extraction: molecules -> concatenated ADE features.
 
     For each (kappa, sigma, channel) combination:
@@ -231,7 +251,7 @@ def extract_molecular_features(all_coords, all_atoms, ade,
         for sigma in sigmas:
             # Get per-channel vertex activations for this (kappa, sigma)
             channel_arrays = batch_vertex_activations(
-                all_coords, all_atoms, kappa, sigma)
+                all_coords, all_atoms, kappa, sigma, use_abs=use_abs)
 
             for ch in range(N_ATOM_CHANNELS):
                 combo_i += 1

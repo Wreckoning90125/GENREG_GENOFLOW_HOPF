@@ -215,6 +215,10 @@ class SnakeEnvironment:
             "food_y": float(self.food_y),
             "food_dx": float(food_dx),
             "food_dy": float(food_dy),
+            # Snake's facing direction as a unit-vector pair. Exposing
+            # this lets controllers express food direction in the
+            "head_dx": float(self.direction[0]),
+            "head_dy": float(self.direction[1]),
             "near_wall": near_wall,
             "alive": 1.0 if self.alive else 0.0,
         }

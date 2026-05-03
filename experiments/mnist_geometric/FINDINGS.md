@@ -9,6 +9,62 @@ are below. The file supersedes the deleted `hopf_v11_ade/FINDINGS.md`
 and `hopf_v12_ade/FINDINGS.md`; neither should be resurrected without a
 commit that explicitly addresses the critique here.
 
+## ADDENDUM (post-2026 audit): two setup bugs in the v6-v12 baseline
+
+Two distinct setup bugs were found in the math substrate that the
+v6-v12 trainers all use. Both predate this document; the v10 97.39%
+headline number was produced with both bugs in place. They are now
+fixed at the substrate level (`hopf_controller.py`,
+`ade_geometry.py`); the same trainers re-run on the same data give
+new headline numbers. **Re-read the rest of this document with the
+understanding that "v10 = 97.39%" is the broken-baseline number;
+the corrected number is 97.86%.**
+
+The bugs are:
+
+1. **`np.abs(pixel_quats @ vertices.T)` in `_build_pixel_kernel`**
+   collapsed the spinor double cover (`q ~ -q`) and identified
+   antipodal pairs of 600-cell vertices; effectively halved the
+   pixel-to-vertex projection's resolution.
+2. **`np.argmax(np.abs(verts @ p))` in `ade_geometry.perms`**
+   construction picked the wrong vertex ~50% of the time
+   (antipodal-pair coin flip), corrupting the group representation
+   used to build all downstream irrep projectors and CG matrices.
+   This was the more damaging of the two — it also changed the
+   number of legitimate features extracted from 879 to 1605.
+
+A/B at the v10 setup (60k train / 10k test, multi-scale kappas
+[3.0, 5.5, 8.0], same kernel ridge alpha sweep; see
+`bench_mnist_chirality.py`):
+
+  | mode                                     | linear ridge | kernel ridge |
+  |------------------------------------------|-------------:|-------------:|
+  | original (both bugs in place — "v10")    | 95.21%       | 97.32%       |
+  | + chirality fix + perms fix              | **97.23%**   | **97.86%**   |
+
+Linear ridge improved by +2.02 pp. Kernel ridge by +0.50 pp; the
+poly degree-2 kernel had partially compensated for the broken
+group representation via quadratic feature interactions.
+
+Neither fix is about the chirality CLAIM that was retracted below.
+The chirality claim was that the *signed Berry phase* feature
+detects orientation across digits in a transfer test; that claim
+remains retracted. The chirality FIX described here is to a
+DIFFERENT chirality issue (the spinor double cover in the vMF
+kernel) which was not load-bearing for the chirality claim either
+direction.
+
+Beyond MNIST, the same two bugs were found in the chemistry
+pipelines (`mol_kernel.py` and `mol_kernel_local.py`) with
+analogous effects there. See `bench_qm9.py` and `bench_qm9_local.py`
+in the repo root.
+
+---
+
+## Pre-audit content (chirality claim retraction etc.) follows
+
+
+
 ## TL;DR
 
 - Current best MNIST result: **v10 at 97.39% test accuracy** with
@@ -325,10 +381,22 @@ Any future chirality test run on this repo is expected to live under
 
 ## Bottom line
 
-- Best MNIST result in the repo: **v10 at 97.39%**, multi-scale
-  kernel ridge over 879 fixed geometric features. This stands.
+- Best MNIST result in the repo, post-audit: **97.86%** kernel
+  ridge / **97.23%** linear ridge, on the same v10 trainer with two
+  setup bugs in the math substrate fixed (chirality / spinor
+  double cover in the pixel kernel; group-action permutation
+  table corruption in `ade_geometry.perms`). 1605 features (535
+  per kappa × 3 kappas) — the perms fix unlocked legitimate
+  irrep components that the corrupted permutations had been
+  suppressing.
+- The pre-audit headline was v10 at 97.39%; that number reflects
+  the broken-baseline setup. `bench_mnist_chirality.py` reproduces
+  both numbers under controlled A/B and is committed alongside this
+  document.
 - v11 and v12 add more geometry but do not improve MNIST accuracy
-  over v10. That itself is an honest negative result.
+  over v10 (pre-audit) or post-audit beyond the +0.5 pp the
+  setup-bug fixes give. The "extra geometry doesn't help on MNIST"
+  finding stands.
 - The signed Berry phase is **not shown** to carry chirality signal
   in any of the six cells of the rigorous cross-digit transfer
   comparison. The earlier per-version claim is retracted.

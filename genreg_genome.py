@@ -5,6 +5,7 @@
 
 from genreg_controller import Controller
 from hopf_controller import HopfController
+from snake_hopf_controller import SnakeHopfController
 from genreg_proteins import (
     SensorProtein, TrendProtein, TrustModifierProtein,
     ComparatorProtein, IntegratorProtein, GateProtein,
@@ -26,6 +27,9 @@ class Genome:
         self.controller_type = controller_type
         if controller is not None:
             self.controller = controller
+        elif controller_type == "snake_hopf":
+            self.controller = SnakeHopfController(output_size=output_size,
+                                                    hidden_size=hidden_size)
         elif controller_type == "hopf":
             self.controller = HopfController(input_size, hidden_size, output_size)
         else:

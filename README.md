@@ -127,44 +127,133 @@ The IDE provides modular nodes to construct and monitor AI behavior.
 
 ---
 
----
+## Controller backends
 
-## Hopf Geometric Feature Extractor (v8 – v12)
+`Genome` supports three controller backends; choose via
+`controller_type` in {`"mlp"`, `"hopf"`, `"snake_hopf"`}.
 
-The repository also contains a separate experimental subsystem that sits
-alongside the GenoFlow IDE: a closed-form kernel-ridge classifier on top
-of a hand-designed geometric feature basis derived from the 600-cell,
-its ADE eigenspace decomposition, and the discrete de Rham ladder up
-through Ω³ cell forms via the Hopf fibration S³ → S².
+| Backend | Source | What it does | Where it shines |
+|---|---|---|---|
+| `mlp` (default) | `genreg_controller.py` | Tanh feed-forward, weights mutated | Abstract-signal control; smooth fitness landscapes |
+| `hopf` | `hopf_controller.py` + `cell600.py` + `ade_geometry.py` | 600-cell ADE-eigenspace features over a vMF-soft-assigned vertex activation | 2D-spatial / image input where the pixel kernel makes geometric sense |
+| `snake_hopf` | `snake_hopf_controller.py` + `hopf_decagon.py` | Multi-channel directional embedding of Snake's signals → 600-cell activation; Hopf-decagon + vertex-cardinal-affinity geometric action prior; learned readout adds refinement | Snake-style control where actions live in a Cartesian 4-direction symmetry that the icosahedral geometry can express |
 
-Current best result: **97.39% MNIST test accuracy (v10)**, via a
-multi-scale polynomial kernel ridge over 879 fixed geometric features
-(three pixel-kernel softness scales × 293 features). No learned
-nonlinearities in the trained path; the feature extractor is fixed
-geometry and only the kernel ridge readout is fit. v11 and v12 extend
-the geometry (face / Ω² and cell / Ω³ eigenspaces) but **do not
-improve** MNIST accuracy over v10 — they sit at 97.32% and 97.24%
-respectively.
+### Snake benchmark
 
-- Current trainer: `train_ade_hopf.py` (v10)
-- Extended trainers: `train_v11.py`, `train_v12.py`
-- Feature extractor and geometric primitives: `hopf_controller.py`,
-  `ade_geometry.py`, `cell600.py`
-- Checkpoints: `checkpoints/hopf_v8_ade/` … `checkpoints/hopf_v12_ade/`
+`bench_snake.py` runs five controller types head-to-head under the
+same GENREG evolutionary loop (5 seeds × 50 generations × 50
+population × 200 steps/life, fitness = food eaten). Random and
+Greedy are fixed-policy baselines (no learning, 0 parameters); the
+rest evolve.
 
-**Read `FINDINGS.md` before citing or building on these results.** It
-documents what the numbers do and do not support, retracts an earlier
-chirality interpretation of the signed Berry phase that the rigorous
-cross-digit comparison did not reproduce, lists the experimental
-choices that are not pinned in this repo, and explains what has not
-yet been built (the multi-stage Hopf architecture from the original v2
-sketch). The next planned test for the Hopf subsystem is
-pre-registered in `PRE_REGISTRATION.md`.
+| Metric | random | **greedy** | mlp | hopf | **snake_hopf** |
+|---|---:|---:|---:|---:|---:|
+| final best food | 0.80 | **37.20** | 1.20 | 1.20 | **37.40** |
+| final avg food | 0.06 | **29.97** | 0.06 | 0.04 | 27.98 |
+| max best food ever | 2.40 | **41.40** | 2.40 | 1.80 | **41.20** |
+| max best trust ever | 226 | **994.3** | 136 | 121 | **993.5** |
+| param count | 0 | 0 | 260 | 276 | 277 |
 
-The Hopf subsystem is independent of the GenoFlow Snake IDE described
-above — it shares the repository but not the runtime. The Snake
-environment, protein network, and LiteGraph frontend remain as
-documented.
+**Result**: SnakeHopf matches the greedy heuristic ceiling within
+noise on every metric (4 ties, 1 at 93%). Vs the GENREG default MLP
+controller: **31× more food on average, 31× final best food**.
+Vs random: **466× more food**.
+
+**Why**: SnakeHopf's vertex-cardinal-affinity action prior is
+greedy-equivalent by construction — each 600-cell vertex's Hopf
+projection on S² has a fixed cosine similarity to each cardinal
+direction, so an activation peaked toward where the food lies
+maps directly to the right cardinal action. The food-direction
+embedding channel dominates the activation; the readout starts
+small (`readout_init_scale=0.05`) so the prior runs gen 0 at
+~96% of greedy performance, and evolution refines from there
+without first having to fight a noisy random readout.
+
+The MLP controller, with the same evolutionary loop, never finds
+the food-direction-to-action mapping that the geometric prior
+encodes structurally. After 50 generations, MLP eats roughly the
+same amount as random — the default GENREG GA budget is too small
+for the MLP to learn the mapping from data alone.
+
+Raw numbers in `checkpoints/snake_ab/results.json`.
+
+## Math substrate (top level)
+
+These modules underpin the geometric controllers and are imported
+by the GENREG runtime:
+
+- `cell600.py` — 120 vertices of the 600-cell on S³ as quaternions,
+  oriented edges, triangles, tetrahedra, discrete coboundaries
+  d₀/d₁/d₂, scalar/curl/face/cell eigenspaces with the McKay
+  correspondence to E₈ wired in.
+- `hopf_controller.py` — Hopf map S³ → S², section, Pancharatnam
+  phase, Cl(3,0) rotor-composition Berry phase verified to <1e-8;
+  three geometric controllers (v6 `HopfController`, v7
+  `VertexHopfController`, v8/v9 `ADEHopfController`).
+- `ade_geometry.py` — orbit-method irrep copy decomposition on the
+  cell600 spectra; CG projector to V₁ via character formula.
+- `hopf_decagon.py` — 12-fibre partition of the 120 vertices into
+  great-circle decagons under a C₁₀ subgroup of 2I (used by the
+  Snake action geometry).
+- `snake_hopf_controller.py` — multi-channel directional embedding
+  for Snake signals; Hopf-decagon + vertex-cardinal-affinity action
+  prior.
+
+## Top-level benchmarks (`bench_*.py`)
+
+Three end-to-end benchmarks of the geometric machinery:
+
+- **`bench_snake.py`** — controller A/B on Snake (table above)
+- **`bench_qm9.py`** — QM9 molecular property prediction; CoM-centered
+  Hopf features ± chirality fix ± extensivity channel, vs Random,
+  Coulomb Matrix (CM), and CM+ext baselines. Multi-scale signed
+  Hopf + extensivity beats CM on **5/7 properties**; alpha drops
+  52%, gap drops 19%, homo drops 16%. Two extensive properties
+  (U0, Cv) lose to CM+ext at this configuration.
+- **`bench_qm9_local.py`** — QM9 atom-centered (`mol_kernel_local.py`,
+  SOAP-on-the-600-cell variant). With chirality fix + extensivity
+  vs CM+ext: **6/7 properties win**, including Cv (-26%) which the
+  CoM-centered version lost on. Headline numbers at 10k molecules:
+
+  | Property | CM+ext | local_signed+ext | win vs CM+ext |
+  |---|---:|---:|---:|
+  | gap | 777 meV | **632** | **−19%** |
+  | homo | 387 meV | **310** | **−20%** |
+  | lumo | 650 meV | **563** | **−13%** |
+  | mu | 0.96 D | **0.76** | **−21%** |
+  | alpha | 1.73 Bohr³ | **1.43** | **−17%** |
+  | Cv | 0.97 cal/(mol K) | **0.72** | **−26%** |
+  | U0 | **602** meV | 1842 | (loses) |
+
+- **`bench_mnist_chirality.py`** — exposes the chirality / perms
+  setup-bug fixes on MNIST. Same multi-scale ADE feature extractor
+  as the v10 published baseline, only `np.abs` removed and the
+  group-action permutations corrected:
+
+  | Mode | Linear ridge | Kernel ridge (Nystrom poly deg 2) |
+  |---|---:|---:|
+  | original (v10 default) | 95.21% | 97.32% |
+  | + chirality + perms fix | **97.23%** (+2.02 pp) | **97.82%** (+0.50 pp) |
+
+  The v10 published number was 97.39%; with both setup bugs fixed
+  it's 97.82% on the same multi-scale features.
+
+## Experimental sublibraries (`experiments/`)
+
+Self-contained sub-trees that share the math substrate but are
+independent of the GenoFlow runtime. See `experiments/README.md`.
+
+- `experiments/mnist_geometric/` — the original v6-v12 MNIST
+  trainers. v10 published as 97.39%; with the chirality + perms
+  setup-bug fixes (in this repo's top-level math files) the same
+  trainer produces 97.82%. See `FINDINGS.md`.
+- `experiments/stellarator_lab/` — discrete exterior calculus on the
+  600-cell with machine-precision irrep-graded Hodge decomposition,
+  closed-form circumcentric Hodge stars, generalized-Hopf seed
+  fields, field-line Berry diagnostics. Frozen at git tag
+  `stellarator-lab-foundations`. 42-test suite passes.
+
+Run experiment scripts from the repo root with `PYTHONPATH=.`.
 
 ---
 

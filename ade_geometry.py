@@ -43,14 +43,21 @@ def get_ade():
     N = len(verts)
 
     # ---- 1. Group action permutations ----
-    # perms[g][i] = index of g * v_i in vertex set
+    # perms[g][i] = index of g * v_i in the vertex set.
+    # IMPORTANT: use signed dot, not abs. The 600-cell vertices come
+    # in antipodal pairs (v and -v are both vertices), so np.abs
+    # picks either v_k or -v_k arbitrarily -- previously this
+    # silently corrupted ~50% of the permutation table, conflating
+    # 2I with its quotient I (the icosahedral rotation group of
+    # order 60), and breaking the irrep structure for spinor
+    # representations.
     print("  Group action permutations...")
     perms = np.zeros((N, N), dtype=np.int32)
     for g in range(N):
         for i in range(N):
             p = _qmul(verts[g], verts[i])
             p /= np.linalg.norm(p)
-            perms[g, i] = np.argmax(np.abs(verts @ p))
+            perms[g, i] = np.argmax(verts @ p)
 
     # ---- 2. Process each eigenspace ----
     print("  Eigenspace decomposition and CG matrices...")

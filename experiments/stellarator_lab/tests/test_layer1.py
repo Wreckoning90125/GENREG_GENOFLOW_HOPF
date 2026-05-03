@@ -1,0 +1,612 @@
+"""
+Stellarator-lab math verification suite.
+
+Verifies:
+    1. Seeds       -> closed-form generalized-Hopf field + analytic helicity
+    2. Verification -> 600-cell witness with machine-zero harmonic leak
+    3. Hodge stars -> closed-form circumcentric scalars, metric/comb ratio
+    4. Hopf decagon -> 12-fiber partition with C_10 invariance
+    5. Bundle diagnostics -> Berry-phase Pancharatnam vs Clifford agreement
+
+Run from the repo root: `PYTHONPATH=. pytest experiments/stellarator_lab/tests/`
+
+The header below also injects the right paths so the suite runs from
+any cwd.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+# Inject paths so imports from cell600 (repo root) and hopf_seed (this
+# experiment dir) both resolve regardless of cwd.
+_HERE = Path(__file__).resolve().parent
+_LAB = _HERE.parent
+_REPO = _LAB.parent.parent
+for p in (str(_REPO), str(_LAB)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+import numpy as np
+import pytest
+
+
+# -----------------------------------------------------------------------------
+# Seed construction
+# -----------------------------------------------------------------------------
+
+def test_div_B_converges_second_order_at_1_1():
+    """Central-difference max|div B| on the (1,1) grid scales as O(h^2)
+    (slope >= 1.8). This is the cleanest case — higher windings have
+    sharper spatial features and need finer grids to hit asymptotic order."""
+    from hopf_grid import convergence_study
+
+    res = convergence_study(
+        1, 1, 1.0,
+        bbox=(-3.0, 3.0, -3.0, 3.0, -3.0, 3.0),
+        resolutions=[32, 64, 96, 128],
+    )
+    hs = np.array([r["h"] for r in res["runs"]])
+    divs = np.array([r["max_abs_divB"] for r in res["runs"]])
+    slope, _ = np.polyfit(np.log(hs), np.log(divs), 1)
+    assert slope >= 1.8, f"div B (1,1) slope {slope:.3f} < 1.8"
+
+
+@pytest.mark.parametrize("omega1,omega2", [(2, 1), (3, 2), (2, 3)])
+def test_div_B_monotone_convergent(omega1, omega2):
+    """For higher windings, require monotone decrease of max|div B| with
+    resolution and at least first-order behaviour (slope >= 1.0)."""
+    from hopf_grid import convergence_study
+
+    res = convergence_study(
+        omega1, omega2, 1.0,
+        bbox=(-3.0, 3.0, -3.0, 3.0, -3.0, 3.0),
+        resolutions=[32, 64, 96],
+    )
+    divs = [r["max_abs_divB"] for r in res["runs"]]
+    assert divs[0] > divs[1] > divs[2], (
+        f"div B not monotone decreasing: {divs} for ({omega1},{omega2})"
+    )
+    hs = np.array([r["h"] for r in res["runs"]])
+    slope, _ = np.polyfit(np.log(hs), np.log(np.array(divs)), 1)
+    assert slope >= 1.5, (
+        f"div B slope {slope:.3f} < 1.5 for ({omega1},{omega2})"
+    )
+
+
+def test_curl_A_equals_B():
+    """Central-difference curl A - B also converges as O(h^2)."""
+    from hopf_grid import convergence_study
+
+    res = convergence_study(
+        1, 1, 1.0,
+        bbox=(-3.0, 3.0, -3.0, 3.0, -3.0, 3.0),
+        resolutions=[32, 64, 96],
+    )
+    hs = np.array([r["h"] for r in res["runs"]])
+    errs = np.array([r["max_abs_curlA_minus_B"] for r in res["runs"]])
+    slope, _ = np.polyfit(np.log(hs), np.log(errs), 1)
+    assert slope >= 1.7, f"curl A - B slope {slope:.3f} < 1.7"
+
+
+def test_analytic_invariants():
+    from hopf_seed import analytic_iota, analytic_linking_number
+
+    for w1, w2 in [(1, 1), (2, 1), (3, 2), (2, 3), (5, 3)]:
+        assert analytic_iota(w1, w2) == pytest.approx(w1 / w2)
+        assert analytic_linking_number(w1, w2) == w1 * w2
+
+
+@pytest.mark.parametrize(
+    "n,m,expected_over_pi2",
+    [
+        (1, 1, 1.0),
+        (2, 1, 4.0 / 3.0),
+        (1, 2, 4.0 / 3.0),
+        (3, 2, 6.0 / 5.0),
+        (2, 3, 6.0 / 5.0),
+        (3, 3, 9.0 / 10.0),
+        (4, 4, 16.0 / 35.0),
+    ],
+)
+def test_analytic_helicity_closed_form(n, m, expected_over_pi2):
+    """analytic_helicity matches H/pi^2 = 2nm * n!m! / (n+m)!"""
+    import math
+    from hopf_seed import analytic_helicity
+
+    H = analytic_helicity(n, m, R=1.0)
+    assert H / (math.pi ** 2) == pytest.approx(expected_over_pi2, abs=1e-12)
+
+
+def test_analytic_helicity_R_scaling():
+    """H scales as R^4 by dimensional analysis; the closed form must
+    reproduce that exactly."""
+    from hopf_seed import analytic_helicity
+
+    H1 = analytic_helicity(2, 3, R=1.0)
+    H2 = analytic_helicity(2, 3, R=2.0)
+    assert H2 / H1 == pytest.approx(16.0, abs=1e-12)
+
+
+def test_grid_helicity_matches_closed_form():
+    """At large bbox + decent resolution, the numerical grid helicity
+    matches the closed-form analytic_helicity to better than 1e-3."""
+    from hopf_seed import analytic_helicity
+    from hopf_grid import build_grid, sample_seed_on_grid, grid_helicity
+
+    bbox = (-10.0, 10.0, -10.0, 10.0, -10.0, 10.0)
+    grid = build_grid(bbox, 96)
+    for w1, w2 in [(1, 1), (2, 1), (3, 2)]:
+        B, A = sample_seed_on_grid(grid, w1, w2, 1.0)
+        H_grid = grid_helicity(A, B, grid["dx"])
+        H_an = analytic_helicity(w1, w2, 1.0)
+        rel = abs(H_grid - H_an) / abs(H_an)
+        assert rel < 1e-3, (
+            f"({w1},{w2}): grid H={H_grid}, analytic H={H_an}, rel_err={rel}"
+        )
+
+
+# -----------------------------------------------------------------------------
+# 600-cell second witness
+# -----------------------------------------------------------------------------
+
+def test_600cell_chain_complex_is_zero():
+    """d1 . d0 = 0 and d2 . d1 = 0 structurally on the full complex."""
+    from hopf_600cell_witness import embed_600cell, check_chain_complex
+
+    emb = embed_600cell()
+    dd01, dd12 = check_chain_complex(emb)
+    assert dd01 == 0.0
+    assert dd12 == 0.0
+
+
+def test_isotypic_dim_table_matches_2I_decomposition():
+    """The image-d0 dims per irrep must reproduce the d^2 pattern of 2I
+    irreps in the regular representation, with the trivial irrep
+    contributing 0 (constants are in ker d0).
+    """
+    from hopf_600cell_witness import embed_600cell, isotypic_dim_table
+
+    emb = embed_600cell()
+    table = isotypic_dim_table(emb)
+    assert table["total_vertex_dim"] == 120, table
+    assert table["total_edge_image_d0"] == 119, table
+    # Vertex isotypic dims (sorted by index, which matches the cell600
+    # scalar_eigenspaces order): squared 2I irrep dims.
+    expected_vertex = [1, 4, 9, 16, 25, 36, 9, 16, 4]
+    actual_vertex = [r["vertex_isotypic_dim"] for r in table["per_irrep"]]
+    assert actual_vertex == expected_vertex, (expected_vertex, actual_vertex)
+    # Edge image-d0 dims: the trivial irrep is in the kernel of d0,
+    # so its image is 0; all others image the full d^2 dim.
+    expected_image = [0] + expected_vertex[1:]
+    actual_image = [r["edge_image_d0_dim"] for r in table["per_irrep"]]
+    assert actual_image == expected_image, (expected_image, actual_image)
+
+
+@pytest.mark.parametrize("omega1,omega2", [(1, 1), (2, 1), (3, 2), (2, 3), (4, 4)])
+def test_600cell_witness_harmonic_zero(omega1, omega2):
+    """Hard test: with native S^3 sampling on the full 120-vertex
+    complex, 2I-equivariance is preserved exactly and H^1(S^3) = 0
+    forces the harmonic component to be identically zero (machine-
+    precision floating point).
+
+    This is the rank-2-tensor / equivariant claim made executable: the
+    correct coordinate chart for this problem is the 2I-irrep grading,
+    and respecting it gives the predicted machine-zero leak.
+    """
+    from hopf_600cell_witness import run_witness
+
+    r = run_witness(omega1, omega2, R=1.0)
+    assert r["chain_d1_d0"] == 0.0
+    assert r["chain_d2_d1"] == 0.0
+    assert r["harmonic_leak_relative"] < 1e-12, (
+        f"harmonic leak {r['harmonic_leak_relative']:.3e} not below 1e-12 "
+        f"for ({omega1}, {omega2})"
+    )
+    # Exact + coexact must reconstruct A_edges since harmonic = 0:
+    # ||A||^2 = ||A_exact||^2 + ||A_coexact||^2
+    total = r["exact_fraction"] ** 2 + r["coexact_fraction"] ** 2
+    assert abs(total - 1.0) < 1e-10, (
+        f"Hodge split sum of squares = {total} (expect 1) for ({omega1}, {omega2})"
+    )
+
+
+# -----------------------------------------------------------------------------
+# Field-line tracing and iota recovery
+# -----------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "omega1,omega2,expected_iota,tol",
+    [
+        (1, 1, 1.0, 0.05),
+        (3, 2, 1.5, 0.05),
+        (2, 3, 2.0 / 3.0, 0.05),
+    ],
+)
+def test_iota_recovered(omega1, omega2, expected_iota, tol):
+    from hopf_seed import seed_field
+    from hopf_fieldlines import trace_fieldline, recover_iota
+
+    def Bfn(x, y, z):
+        return seed_field(x, y, z, omega1, omega2, 1.0)
+
+    x0 = np.array([1.3, 0.0, 0.25])
+    tr = trace_fieldline(Bfn, x0, max_length=80.0, max_steps=8000)
+    info = recover_iota(tr["path"], R_core=1.0)
+    assert not np.isnan(info["iota"]), f"iota fit failed: {info['message']}"
+    # iota may be fit with sign convention -d(theta)/d(phi) depending on
+    # field orientation; compare absolute values
+    assert abs(abs(info["iota"]) - expected_iota) < tol, (
+        f"iota={info['iota']} not within {tol} of {expected_iota}"
+    )
+
+
+# -----------------------------------------------------------------------------
+# Berry-phase diagnostic
+# -----------------------------------------------------------------------------
+
+def test_berry_routes_agree():
+    """Pancharatnam and Clifford-rotor accumulation agree to machine
+    precision along a traced field line (tighter than the <1e-8 agreement
+    on individual triangles verified in hopf_controller)."""
+    from hopf_seed import seed_field
+    from hopf_berry_diagnostic import accumulate_along_fieldline
+
+    def Bfn(x, y, z):
+        return seed_field(x, y, z, 2, 1, 1.0)
+
+    r = accumulate_along_fieldline(Bfn, np.array([1.3, 0.0, 0.2]), max_length=50.0)
+    assert r["routes_agree"] < 1e-10, (
+        f"Berry routes diverged: panch={r['pancharatnam_total']} "
+        f"cliff={r['clifford_berry_total']} diff={r['routes_agree']}"
+    )
+
+
+def test_berry_phase_at_1_1_is_2pi_multiple():
+    """For (1,1) the closed Villarceau field line maps to a great
+    circle on S^2; accumulated Pancharatnam phase is a multiple of 2*pi
+    to numerical tolerance."""
+    from hopf_seed import seed_field
+    from hopf_berry_diagnostic import accumulate_along_fieldline
+
+    def B11(x, y, z):
+        return seed_field(x, y, z, 1, 1, 1.0)
+
+    # max_length=60 gives ~1 full closure of the Villarceau circle from
+    # this start point; the accumulated Pancharatnam phase is 2*pi.
+    r = accumulate_along_fieldline(B11, np.array([1.2, 0.0, 0.2]), max_length=60.0)
+    phase = r["pancharatnam_total"]
+    # Expect a multiple of 2*pi modulo tracer truncation. At max_length=60
+    # the empirical phase is exactly 2*pi; tolerate drift of 5e-3.
+    residual = abs((phase / (2.0 * np.pi)) - round(phase / (2.0 * np.pi)))
+    assert residual < 5e-3, (
+        f"(1,1) Berry phase not a 2pi multiple: phase={phase}, "
+        f"residual={residual}"
+    )
+
+
+# -----------------------------------------------------------------------------
+# I/O round-trip
+# -----------------------------------------------------------------------------
+
+def test_hdf5_round_trip():
+    from hopf_grid import build_grid, sample_seed_on_grid
+    from hopf_io import write_hdf5, read_hdf5
+
+    grid = build_grid((-2.0, 2.0, -2.0, 2.0, -2.0, 2.0), 16)
+    B, A = sample_seed_on_grid(grid, 2, 1, 1.0)
+    meta = {
+        "omega1": 2,
+        "omega2": 1,
+        "R": 1.0,
+        "bbox": list(grid["bbox"]),
+        "resolution": 16,
+        "iota": 2.0,
+        "linking_number": 2,
+    }
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "seed.h5")
+        write_hdf5(path, grid, B, A, meta)
+        g2, B2, A2, m2 = read_hdf5(path)
+        assert np.allclose(B, B2)
+        assert np.allclose(A, A2)
+        assert m2["omega1"] == 2
+        assert m2["linking_number"] == 2
+
+
+def test_vtk_writes_valid_file():
+    from hopf_grid import build_grid, sample_seed_on_grid
+    from hopf_io import write_vtk
+
+    grid = build_grid((-2.0, 2.0, -2.0, 2.0, -2.0, 2.0), 12)
+    B, A = sample_seed_on_grid(grid, 1, 1, 1.0)
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "seed.vti")
+        write_vtk(path, grid, B, A)
+        assert os.path.getsize(path) > 1000
+        # Re-read sanity check
+        import pyvista as pv
+        img = pv.read(path)
+        assert "B" in img.point_data
+        assert img.point_data["B"].shape == (12 * 12 * 12, 3)
+
+
+# -----------------------------------------------------------------------------
+# Stage 1: metric Hodge star on the 600-cell (CONSULTATION.md Q7 -> option b).
+# -----------------------------------------------------------------------------
+
+def test_hodge_stars_are_scalar_times_identity():
+    """Every k-cell of the regular 600-cell lies in a single H_4-orbit,
+    so the circumcentric Hodge star is a scalar . I on each cochain
+    space. This is the property that makes 2I-equivariance automatic."""
+    import math
+    import numpy as np
+    from hopf_metric import (
+        hodge_star_0, hodge_star_1, hodge_star_2, hodge_star_3,
+        STAR_0_SCALAR, STAR_1_SCALAR, STAR_2_SCALAR, STAR_3_SCALAR,
+    )
+
+    for star, scalar, dim in [
+        (hodge_star_0(), STAR_0_SCALAR, 120),
+        (hodge_star_1(), STAR_1_SCALAR, 720),
+        (hodge_star_2(), STAR_2_SCALAR, 1200),
+        (hodge_star_3(), STAR_3_SCALAR, 600),
+    ]:
+        assert star.shape == (dim, dim)
+        # Diagonal with constant entries
+        diag = np.diag(star)
+        assert np.allclose(diag, scalar, atol=1e-14)
+        off = star - np.diag(diag)
+        assert np.max(np.abs(off)) < 1e-14
+
+
+def test_hodge_star_consistency_identity():
+    """*_0 . *_3 = 5 exactly (cell-per-vertex orbit ratio
+    600 / 120 = 5)."""
+    from hopf_metric import STAR_0_SCALAR, STAR_3_SCALAR
+    assert abs(STAR_0_SCALAR * STAR_3_SCALAR - 5.0) < 1e-14
+
+
+def test_hodge_stars_are_2I_equivariant_trivially():
+    """A scalar . I commutes with every linear operator, so no group
+    action need be introduced to check 2I-equivariance. The test
+    asserts the algebraic property directly: the Hodge star is in the
+    centre of End(C^k(600-cell))."""
+    import numpy as np
+    from hopf_metric import hodge_star_1
+    star = hodge_star_1()
+    rng = np.random.default_rng(0)
+    for _ in range(8):
+        M = rng.standard_normal(star.shape)
+        commutator = star @ M - M @ star
+        assert np.max(np.abs(commutator)) < 1e-12
+
+
+def test_metric_laplacian_irrep_multiplicities():
+    """Delta_0 = *_0^{-1} d0^T *_1 d0 decomposes by 2I isotypic with
+    multiplicities matching the combinatorial Laplacian's:
+    [1, 4, 9, 16, 25, 36, 9, 16, 4] in the cell600 ordering by
+    eigenvalue. Within each isotypic block, Schur's lemma forces the
+    operator to be a scalar times the identity (NOT just a scalar
+    eigenvalue with multiplicity d^2 for an unstructured operator;
+    the d^2-dim isotypic is d copies of the d-dim irrep, and 2I-
+    equivariance plus the additional H_4 invariance of Delta forces a
+    single eigenvalue across all d copies)."""
+    import numpy as np
+    from hopf_metric import metric_laplacian_0
+    from cell600 import get_geometry
+
+    L = metric_laplacian_0()
+    g = get_geometry()
+    expected_mults = [1, 4, 9, 16, 25, 36, 9, 16, 4]
+    for i, es in enumerate(g["scalar_eigenspaces"]):
+        V = es["vectors"]
+        assert V.shape[1] == expected_mults[i]
+        # Schur's lemma + H_4 invariance: L | block = lambda_i I
+        block = V.T @ L @ V
+        diag = np.diag(block)
+        off = block - np.diag(diag)
+        assert np.max(np.abs(off)) < 1e-12, (
+            f"isotypic block {i} not diagonal: off-diag max {np.max(np.abs(off))}"
+        )
+        spread = float(np.max(diag) - np.min(diag))
+        assert spread < 1e-12, (
+            f"isotypic block {i} eigenvalue spread {spread} > 1e-12"
+        )
+
+
+def test_metric_to_combinatorial_eigenvalue_ratio_is_exact():
+    """Metric eigenvalues are combinatorial eigenvalues scaled by
+    exactly *_1 / *_0 (= STAR_1_SCALAR / STAR_0_SCALAR), because
+    Delta_0_metric = (*_1 / *_0) Delta_0_combinatorial when the Hodge
+    stars are scalar . I."""
+    import numpy as np
+    from hopf_metric import (
+        metric_laplacian_0,
+        STAR_0_SCALAR,
+        STAR_1_SCALAR,
+    )
+    from cell600 import get_geometry
+
+    L_metric = metric_laplacian_0()
+    g = get_geometry()
+    d0 = g["d0"]
+    L_comb = d0.T @ d0
+
+    expected_ratio = STAR_1_SCALAR / STAR_0_SCALAR
+    for es in g["scalar_eigenspaces"]:
+        V = es["vectors"]
+        block_metric = V.T @ L_metric @ V
+        block_comb = V.T @ L_comb @ V
+        # Both blocks are scalar . I within the isotypic
+        eig_metric = np.diag(block_metric).mean()
+        eig_comb = np.diag(block_comb).mean()
+        if abs(eig_comb) < 1e-10:
+            continue   # trivial isotypic, both zero
+        ratio = eig_metric / eig_comb
+        assert abs(ratio - expected_ratio) < 1e-12, (
+            f"isotypic eigenvalue ratio {ratio} != expected {expected_ratio}"
+        )
+
+
+# -----------------------------------------------------------------------------
+# Stage 2: discrete Hopf decagon decomposition (12 fibres of 10 vertices).
+# -----------------------------------------------------------------------------
+
+def test_decagon_generator_has_quaternion_order_10():
+    """The chosen icosian (phi/2, 1/2, 1/(2 phi), 0) has order 10 under
+    quaternion multiplication: q^10 == 1 to machine precision, q^k != 1
+    for any k in {1, ..., 9}."""
+    import math
+    import numpy as np
+    from hopf_controller import qmul
+    from hopf_decagon import find_order_10_generator, quaternion_order
+    _, q = find_order_10_generator()
+    assert quaternion_order(q) == 10
+    # Direct verification of q.w == cos(pi/5) == phi/2
+    phi = (1 + math.sqrt(5)) / 2
+    assert abs(q[0] - phi / 2) < 1e-12
+    assert abs(q[0] - math.cos(math.pi / 5)) < 1e-12
+    # And spatial magnitude == sin(pi/5)
+    spatial_mag = float(np.linalg.norm(q[1:]))
+    assert abs(spatial_mag - math.sin(math.pi / 5)) < 1e-12
+
+
+def test_decagon_partition_partitions_120_vertices():
+    """The 12 cosets of <g> in 2I form a disjoint partition of the 120
+    vertices, with each orbit of size exactly 10."""
+    import numpy as np
+    from hopf_decagon import hopf_decagon_partition, fiber_label
+
+    orbits, _, _ = hopf_decagon_partition()
+    assert orbits.shape == (12, 10)
+    # Disjoint
+    flat = orbits.flatten()
+    assert len(flat) == 120
+    assert sorted(flat.tolist()) == list(range(120))
+    # Fibre label sanity
+    labels = fiber_label(orbits)
+    assert (labels >= 0).all()
+    counts = np.bincount(labels, minlength=12)
+    assert (counts == 10).all()
+
+
+def test_decagon_adjacent_vertices_are_at_edge_arc_pi_over_5():
+    """Adjacent vertices in each orbit are at angular distance pi/5
+    (the 600-cell edge arc)."""
+    import math
+    import numpy as np
+    from cell600 import get_geometry
+    from hopf_decagon import hopf_decagon_partition
+
+    verts = get_geometry()["vertices"]
+    orbits, _, _ = hopf_decagon_partition()
+    target = math.cos(math.pi / 5)
+    for orbit in orbits:
+        for k in range(10):
+            v = verts[orbit[k]]
+            w = verts[orbit[(k + 1) % 10]]
+            dot = float(np.dot(v, w))
+            assert abs(dot - target) < 1e-12, (
+                f"adjacent dot product {dot} != cos(pi/5)={target}"
+            )
+
+
+def test_decagon_adjacent_pairs_are_600cell_edges():
+    """Every adjacent (v_k, v_{k+1}) pair in every orbit is in the
+    600-cell edge list (so the discrete Hopf fibres are sub-walks of
+    the 1-skeleton, not arbitrary great-circle arcs)."""
+    from cell600 import get_geometry
+    from hopf_decagon import hopf_decagon_partition
+
+    edges = get_geometry()["edges"]
+    edge_set = set(frozenset((int(i), int(j))) for (i, j) in edges)
+    orbits, _, _ = hopf_decagon_partition()
+    for orbit in orbits:
+        for k in range(10):
+            pair = frozenset((int(orbit[k]), int(orbit[(k + 1) % 10])))
+            assert pair in edge_set, f"{pair} is not a 600-cell edge"
+
+
+def test_hopf_1_cochain_has_120_nonzero_entries():
+    """The Hopf 1-cochain has exactly 120 nonzero entries (= 12 fibres
+    times 10 fibre edges per fibre); the remaining 600 entries are
+    zero (inter-fibre edges)."""
+    import numpy as np
+    from hopf_decagon import hopf_decagon_partition, hopf_1_cochain
+
+    orbits, _, _ = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    assert A.shape == (720,)
+    nonzero = int(np.sum(np.abs(A) > 0.5))
+    assert nonzero == 120, f"expected 120 nonzero, got {nonzero}"
+    # All nonzero entries are exactly +/-1
+    assert (np.abs(np.abs(A[np.abs(A) > 0.5]) - 1.0) < 1e-15).all()
+
+
+def test_hopf_1_cochain_integrates_to_10_per_fiber():
+    """Forward integration of A_hopf around each of the 12 fibres
+    gives exactly 10 (the fibre length, since each forward fibre edge
+    contributes +1 in the C_10 direction)."""
+    from hopf_decagon import (
+        hopf_decagon_partition,
+        hopf_1_cochain,
+        integrate_along_fiber,
+    )
+
+    orbits, _, _ = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    for fid in range(12):
+        total = integrate_along_fiber(A, orbits[fid])
+        assert abs(total - 10.0) < 1e-12, (
+            f"fibre {fid} integral = {total}, expected 10"
+        )
+
+
+def test_hopf_1_cochain_is_C10_invariant_machine_zero():
+    """The Hopf 1-cochain is exactly invariant under the C_10 action of
+    the chosen generator g: rho_edges(g) . A_hopf = A_hopf to machine
+    precision. This is the structural symmetry of the discrete Hopf
+    fibration -- the C_10 action permutes fibre edges within each
+    fibre but preserves the cochain.
+
+    NOT invariant under the full 2I (different 2I elements map between
+    different generator-equivalent Hopf 1-cochains); the right
+    symmetry group for A_hopf is the cyclic <g>.
+    """
+    import numpy as np
+    from hopf_decagon import (
+        hopf_decagon_partition,
+        hopf_1_cochain,
+        edge_signed_action,
+    )
+
+    orbits, _, gen = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    P = edge_signed_action(gen)
+    leak = float(np.max(np.abs(P @ A - A)))
+    assert leak < 1e-14, (
+        f"C_10 invariance leak {leak} not at machine precision"
+    )
+
+
+def test_decagon_total_fiber_edges_plus_inter_fiber_edges_is_720():
+    """Sanity accounting: 120 fibre edges + 600 inter-fibre edges = 720
+    total edges. Each vertex has valence 12 in the 600-cell, of which
+    2 are within-fibre (predecessor + successor in C_10) and 10 are
+    between fibres."""
+    from hopf_decagon import (
+        hopf_decagon_partition,
+        hopf_1_cochain,
+    )
+    import numpy as np
+
+    orbits, _, _ = hopf_decagon_partition()
+    A = hopf_1_cochain(orbits)
+    fibre_edge_count = int(np.sum(np.abs(A) > 0.5))
+    inter_edge_count = int(np.sum(np.abs(A) <= 0.5))
+    assert fibre_edge_count == 120
+    assert inter_edge_count == 600
+    assert fibre_edge_count + inter_edge_count == 720

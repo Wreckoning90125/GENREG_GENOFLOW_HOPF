@@ -295,17 +295,22 @@ def evaluate(W, X, labels):
     return np.mean(preds == labels)
 
 
-def extract_features_multiscale(images, ade, kappas):
+def extract_features_multiscale(images, ade, kappas, use_abs=True):
     """
     Multi-scale feature extraction: concatenate features computed at
     different pixel-kernel temperatures. Each kappa gives a different
     softness of the pixel→600-cell vertex projection, capturing
     different spatial scales of the input signal on the net.
+
+    use_abs: passed through to the pixel kernel. True (default) uses
+    |q . v| in the soft-assign (chirality-blind, collapses 120
+    vertices to 60 antipodal pairs). False uses signed dots (full
+    120-vertex 2I resolution).
     """
     from hopf_controller import _get_pixel_kernel
     feats = []
     for k in kappas:
-        pk = _get_pixel_kernel(784, kappa=k)
+        pk = _get_pixel_kernel(784, kappa=k, use_abs=use_abs)
         feats.append(extract_features_batch(images, ade, pk))
     return np.hstack(feats)
 

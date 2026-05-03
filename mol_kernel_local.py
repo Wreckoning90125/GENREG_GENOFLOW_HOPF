@@ -55,10 +55,17 @@ def hopf_section_batch(dirs):
     return q
 
 
-def vmf_assign(quats, kappa):
-    """(N,4) quaternions -> (N,120) soft assignment to 600-cell vertices."""
+def vmf_assign(quats, kappa, use_abs=True):
+    """(N,4) quaternions -> (N,120) soft assignment to 600-cell vertices.
+
+    use_abs: if True (default, original chirality-blind v9 behaviour),
+        |q . v| collapses the spinor double cover and identifies
+        antipodal vertex pairs. If False, signed q . v preserves the
+        full 120-vertex 2I structure (resolves chirality).
+    """
     verts = _get_geo()["vertices"]
-    dots = np.abs(quats @ verts.T)
+    raw = quats @ verts.T
+    dots = np.abs(raw) if use_abs else raw
     s = kappa * dots
     s -= s.max(axis=1, keepdims=True)
     e = np.exp(s)
@@ -66,7 +73,7 @@ def vmf_assign(quats, kappa):
 
 
 def atom_centered_activations(coords, atoms, kappa, rbf_centers, rbf_gamma,
-                               cutoff=5.0):
+                               cutoff=5.0, use_abs=True):
     """Compute atom-centered vertex activations for one molecule.
 
     For each atom i, find neighbors j within cutoff. For each neighbor,
@@ -106,7 +113,7 @@ def atom_centered_activations(coords, atoms, kappa, rbf_centers, rbf_gamma,
 
         # Hopf section + vMF soft assignment
         nb_quats = hopf_section_batch(nb_dirs)
-        nb_assign = vmf_assign(nb_quats, kappa)  # (n_nb, 120)
+        nb_assign = vmf_assign(nb_quats, kappa, use_abs=use_abs)  # (n_nb, 120)
 
         # Gaussian RBF weights: (n_nb, n_rbf)
         rbf_weights = np.exp(-rbf_gamma * (nb_dists[:, None] - rbf_centers[None, :]) ** 2)
@@ -128,7 +135,7 @@ def extract_atom_centered_features(all_coords, all_atoms, ade,
                                     kappas=(3.0, 5.5, 8.0),
                                     n_rbf=20, rbf_min=0.5, rbf_max=6.0,
                                     rbf_gamma=10.0, cutoff=5.0,
-                                    chunk_size=5000):
+                                    chunk_size=5000, use_abs=True):
     """Full pipeline: molecules -> atom-centered ADE features.
 
     Processes molecules in chunks to keep peak memory under control.
@@ -144,10 +151,16 @@ def extract_atom_centered_features(all_coords, all_atoms, ade,
     rbf_centers, gamma = gaussian_rbf_centers(rbf_min, rbf_max, n_rbf, rbf_gamma)
     n_mol = len(all_coords)
     n_combos = len(kappas) * N_CH * n_rbf
-    n_feat = 293 * n_combos
+
+    # Probe the feature width once with a small dummy F matrix. Used to
+    # be hardcoded at 293 (the v8/v9 design with ~50 cg_v1 projections);
+    # after the ade_geometry perms fix it's 535. Safer to query.
+    probe_F = np.zeros((1, 120))
+    n_feat_per_combo = extract_features_from_F(probe_F, ade).shape[1]
+    n_feat = n_feat_per_combo * n_combos
     print(f"  Atom-centered features: {len(kappas)} kappas x {N_CH} channels "
           f"x {n_rbf} RBFs = {n_combos} combos, "
-          f"expect {n_feat} features/mol")
+          f"{n_feat_per_combo} feats/combo, expect {n_feat} features/mol")
     print(f"  Chunk size: {chunk_size}, estimated memory: "
           f"{n_mol * n_feat * 4 / 1e9:.1f} GB (float32)")
 
@@ -163,19 +176,19 @@ def extract_atom_centered_features(all_coords, all_atoms, ade,
             for mi in range(start, end):
                 act = atom_centered_activations(
                     all_coords[mi], all_atoms[mi], kappa,
-                    rbf_centers, gamma, cutoff)
+                    rbf_centers, gamma, cutoff, use_abs=use_abs)
                 chunk_acts.append(act)  # (N_CH, n_rbf, 120)
 
             # Extract features for each (channel, rbf) combo
             for ch in range(N_CH):
                 for r in range(n_rbf):
                     combo_idx = ki * (N_CH * n_rbf) + ch * n_rbf + r
-                    col_start = combo_idx * 293
-                    col_end = col_start + 293
+                    col_start = combo_idx * n_feat_per_combo
+                    col_end = col_start + n_feat_per_combo
 
                     F = np.array([chunk_acts[i][ch, r]
                                   for i in range(n_chunk)])  # (n_chunk, 120)
-                    feats = extract_features_from_F(F, ade)  # (n_chunk, 293)
+                    feats = extract_features_from_F(F, ade)  # (n_chunk, F)
                     X_all[start:end, col_start:col_end] = feats.astype(np.float32)
 
             del chunk_acts
