@@ -346,7 +346,8 @@ concrete numeric or set value everywhere a baseline must match.
 ### Architectural choices that follow from the above
 
 These are not new design freedom; they are determined by the
-pinned slots above:
+pinned slots above plus the deterministic structure of the
+600-cell ADE decomposition.
 
 - Input kernel: vMF soft assignment of the Acrobot state
   (cos θ₁, sin θ₁, cos θ₂, sin θ₂, ω₁_clipped, ω₂_clipped) onto
@@ -356,13 +357,32 @@ pinned slots above:
   re-normalizing. Angular velocities modulate the vMF concentration.
   This is the closest analog of the pixel kernel for a 2-angle
   state and was named explicitly in the document above.
-- Stage transition: Poincaré warp on the dim-4 coefficients
-  before the next stage's vMF projection (as the v2 sketch
-  prescribes).
-- Final readout input: the stage-K dim-4 coefficients of both
-  dim-4 eigenspaces, concatenated (8 numbers).
-- Random search baseline: uniform sampling over the same parameter
-  vector dimensions as MLP-SGD, same number of evaluations.
+- Eigenspace structure (deterministic, from `ade_geometry.get_ade()`):
+  E3 (dim-4 irrep) has multiplicity 4 — 16 coefficients total,
+  reshaped as a (4 copies × 4 irrep-coords) array. Same for E7
+  (the second dim-4 irrep). A "rotor on a dim-4 eigenspace" means
+  one S³ rotor (3 d.o.f.) shared across all 4 copies, acting on
+  the irrep-coord axis. Sharing across copies preserves the
+  multiplicity-space group action (equivariant); per-copy rotors
+  would not.
+- Stage transition: Poincaré warp on the irrep-coord 4-vectors
+  (per copy, per eigenspace) before the next stage's vMF
+  projection back onto the 600-cell, as the v2 sketch prescribes.
+- Final readout input: at stage K, each eigenspace contributes
+  4 copies × 3 Hopf-projected S² coordinates = 12 numbers. Two
+  eigenspaces: 24 numbers total. The readout is a single linear
+  layer 24 → 3 logits with no bias: 72 weights.
+- **Total learnable parameter count: 12 rotor d.o.f. + 72 readout
+  weights = 84.** This is within the 80 ± 5 budget pinned above.
+- MLP baseline matched to 84: a 6 → 8 → 3 tanh net is 6×8 + 8 +
+  8×3 + 3 = 83 params. The 1-param difference is rounded into the
+  matched budget.
+- Random search baseline: uniform sampling over the same 84-d
+  MLP parameter vector, same number of evaluations as MLP-ES.
+
+This correction supersedes the earlier "8 numbers" claim in the
+preceding amendment, which was based on an incorrect reading of
+the eigenspace multiplicity.
 
 ### What this pinning forecloses
 
