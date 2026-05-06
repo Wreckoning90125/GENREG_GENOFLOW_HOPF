@@ -245,6 +245,138 @@ training run.
 - [ ] Environment-step budget and wall-clock budget per seed
 - [ ] Reward metric (mean, median, last-100-episode mean, etc.)
 
+### Pinning amendment — 2026-05-06
+
+All ten slots above are pinned below in a single commit, before any
+training code for the multi-stage Hopf controller has been written.
+Each slot lists the chosen value and the stated reason for choosing
+it. No slot is left ambiguous; "approximately" is replaced by a
+concrete numeric or set value everywhere a baseline must match.
+
+- [x] **Specific task: `Acrobot-v1`.**
+      Discrete 3-action space (torque in {−1, 0, +1}) lets the Hopf
+      architecture reuse the vertex-cardinal-affinity pattern that
+      worked on Snake — each action maps to an S² direction, and
+      vertex affinities give a structural prior. Pendulum-v1's
+      continuous torque output requires either a discretization
+      hack (which adds design freedom) or a continuous readout
+      (which makes the parameter-matched MLP comparison messier).
+      Acrobot also has the property that random search struggles
+      while a tuned MLP does not, which is the discriminating
+      regime named in the original document.
+
+- [x] **K = 2 Hopf stages.**
+      K = 1 is the degenerate case (= a fixed feature extractor +
+      readout, which is what v10 already was). K = 2 is the minimum
+      nontrivial test of the multi-stage hypothesis. K = 3 or higher
+      would be a separate pre-registration if K = 2 fails;
+      pre-emptively running it would re-introduce the design
+      freedom this document exists to remove.
+
+- [x] **Eigenspaces with rotors: dim-4 only (the two dim-4 ADE
+      eigenspaces).**
+      Hopf projection S³ → S² is naturally 4D-source. Rotors live
+      on S³, which acts cleanly on R⁴ as quaternion multiplication.
+      Using dim-5 or dim-6 eigenspaces would require defining an
+      additional group action (embed S³ in SO(5) / SO(6) somehow),
+      which is design freedom we explicitly do not take. Two dim-4
+      eigenspaces × K = 2 stages = 4 rotors total (12 free
+      parameters, since each unit quaternion has 3 d.o.f.).
+
+- [x] **Readout: (c) co-trained linear.**
+      (a) fixed random readout is a bottleneck that risks a false
+      null — a correct architecture could still fail to express
+      itself through a poorly aligned random projection. (b) pre-fit
+      ridge mismatches parameter accounting against the MLP
+      baselines (the readout's params are "spent" but not
+      "learnable"). (c) is the cleanest test: same parameter
+      accounting on both sides, same training signal (ES), same
+      readout family. The architectural difference reduces to "MLP
+      hidden layer with tanh" vs "K=2 Hopf stages with vMF
+      assignment + Hopf projection."
+
+- [x] **Parameter budget: 80 ± 5 learnable parameters.**
+      A 6 → 8 → 3 tanh MLP has 6×8 + 8 + 8×3 + 3 = 83 learnable
+      parameters. The Hopf controller is sized to match: 12 rotor
+      parameters + a co-trained linear readout from the
+      stage-K Hopf-projected coefficients to 3 logits, sized to
+      bring the total to 80 ± 5. The exact readout dimension is
+      computed deterministically from the eigenspace decomposition
+      and is committed in code, not chosen after seeing results.
+
+- [x] **ES: antithetic Gaussian NES, population = 40, σ = 0.10,
+      lr = 0.05.**
+      Standard recipe (Salimans et al. 2017 / OpenAI ES). Antithetic
+      sampling halves variance at no extra evaluations. σ and lr
+      are tunable on validation seeds 100–104 *before* any reporting
+      seed is run; the values committed here are starting points
+      only, and the final pinned values for reporting will be
+      written into a follow-up amendment commit naming the chosen
+      values and their validation-set rewards. The same ES,
+      population, σ, lr is used for the MLP-ES baseline.
+
+- [x] **N = 5 reporting seeds.**
+      Pre-reg minimum. Seeds 0, 1, 2, 3, 4.
+
+- [x] **Validation split: seeds 100, 101, 102, 103, 104.**
+      Used exclusively for ES hyperparameter tuning (σ, lr) and
+      SGD hyperparameter tuning (lr, batch size) before any
+      reporting seed runs. No reporting seed is touched until the
+      validation tuning is finalized and committed.
+
+- [x] **Environment-step budget: 200 ES generations × 40 population
+      × 4 episodes per evaluation × 500 max steps/episode =
+      1.6 × 10⁷ env-steps per seed.**
+      Same budget for all four arms (Hopf-ES, MLP-SGD, MLP-ES,
+      random search). MLP-SGD is given the same env-step budget
+      via on-policy rollouts (REINFORCE-style); the SGD step count
+      is chosen to consume exactly the same env-step budget,
+      computed before training.
+      Wall-clock budget: 10 minutes per seed per arm, hard cap.
+
+- [x] **Reward metric: mean undiscounted episode reward over 20
+      fresh evaluation episodes at the end of training, with a
+      different random seed for env initialization than was used
+      in training.**
+      Avoids end-of-run cherry-picking and stochastic-final-step
+      noise. Acrobot's natural reward structure (−1 per step until
+      balanced, episode caps at 500) means this is bounded in
+      [−500, ~−60] for non-trivial policies.
+
+### Architectural choices that follow from the above
+
+These are not new design freedom; they are determined by the
+pinned slots above:
+
+- Input kernel: vMF soft assignment of the Acrobot state
+  (cos θ₁, sin θ₁, cos θ₂, sin θ₂, ω₁_clipped, ω₂_clipped) onto
+  the 120 vertices of the 600-cell, after embedding the angle pair
+  into a unit quaternion as (cos θ₁/2 · cos θ₂/2, sin θ₁/2 ·
+  cos θ₂/2, cos θ₁/2 · sin θ₂/2, sin θ₁/2 · sin θ₂/2) and
+  re-normalizing. Angular velocities modulate the vMF concentration.
+  This is the closest analog of the pixel kernel for a 2-angle
+  state and was named explicitly in the document above.
+- Stage transition: Poincaré warp on the dim-4 coefficients
+  before the next stage's vMF projection (as the v2 sketch
+  prescribes).
+- Final readout input: the stage-K dim-4 coefficients of both
+  dim-4 eigenspaces, concatenated (8 numbers).
+- Random search baseline: uniform sampling over the same parameter
+  vector dimensions as MLP-SGD, same number of evaluations.
+
+### What this pinning forecloses
+
+- Switching tasks to anything other than Acrobot-v1.
+- Adding K = 3 stages, or stages in dim-5 / dim-6 eigenspaces.
+- Switching readout family.
+- Re-tuning σ, lr, SGD lr after seeing reporting-seed results.
+- Re-defining the reward metric to a more favorable aggregation
+  after seeing reporting-seed results.
+
+A null result under the criteria already stated in the document
+above is a null result. It does not trigger a re-pinning of any
+of the slots above.
+
 ## Why this document exists
 
 The experiments summarized in `FINDINGS.md` were designed after a
