@@ -384,6 +384,53 @@ This correction supersedes the earlier "8 numbers" claim in the
 preceding amendment, which was based on an incorrect reading of
 the eigenspace multiplicity.
 
+### Pinning amendment 2 — 2026-05-07: budget + SGD trainer
+
+After implementing the four arms and profiling the actual forward
+costs (env step 160 µs, Hopf forward 375 µs/call, MLP forward
+8 µs/call, all measured before any reporting-seed run), two of the
+slots committed in the first pinning amendment are revised here.
+This is committed before any reporting-seed run, with profiling
+data — not seed-result data — as the stated reason. The
+architectural slots (task, K, eigenspaces, readout family,
+parameter count) are unchanged.
+
+- **Revised env-step budget: 5 × 10⁵ env-steps per seed.**
+  The original 1.6 × 10⁷ was set without profiling and is
+  inconsistent with any reasonable wall-clock cap on this
+  hardware. 5 × 10⁵ env-steps fits in roughly 4–5 minutes per
+  seed for the slowest arm (Hopf-ES) and 1–2 minutes for the
+  others, leaving headroom. All four arms get the same env-step
+  cap.
+- **Revised wall-clock cap: 8 minutes per seed per arm.**
+  Hard cap. Whichever cap (env-steps or wall-clock) hits first
+  ends that seed's training. Same for all arms.
+- **SGD trainer: PPO with clipped objective + GAE, replacing
+  vanilla REINFORCE.**
+  Vanilla REINFORCE on a 6 → 8 → 3 MLP cannot reliably solve
+  Acrobot at this env-step budget — the credit-assignment
+  problem is severe. PPO is still "MLP trained by SGD with a
+  learning rate tuned only on the validation split"; it is not a
+  different family. Without PPO, the MLP-SGD baseline is
+  guaranteed to null at the truncation floor regardless of Hopf
+  performance, which would render the whole comparison
+  uninformative. Pinned PPO hyperparameters: clip = 0.2, GAE
+  λ = 0.95, entropy coef = 0.01, value-loss coef = 0.5, 4 epochs
+  per update, mini-batch size = 64. Only the policy learning
+  rate is tunable on validation seeds 100–104.
+- Concrete ES generations under the revised budget: pop = 40,
+  σ = 0.10, lr = 0.05, eval_eps_per_gen = 2, max_steps = 500 ⇒
+  worst-case env-steps per generation = 40 × 2 × 500 = 40 000;
+  budget supports up to 12 generations at worst case, and many
+  more in practice as policies improve and episodes terminate
+  sooner. **N = 5 reporting seeds remains pinned.**
+
+These two slots are the only revisions. Everything else from the
+first amendment, including the architectural pinning, the success
+criteria (Welch t-test p < 0.05 + 1σ effect size vs every
+baseline), and the null criteria (a null is a null and does not
+trigger further re-pinning), remains binding.
+
 ### What this pinning forecloses
 
 - Switching tasks to anything other than Acrobot-v1.
