@@ -1,0 +1,157 @@
+[bench] arms=['random_search', 'mlp_ppo', 'mlp_es', 'hopf_es'] seeds=[0, 1, 2, 3, 4]
+[bench] arm=random_search seed=0 starting...
+  [done] eval_mean=-98.3 (std 10.6) in 73.0s
+[bench] arm=random_search seed=1 starting...
+  [done] eval_mean=-89.6 (std 10.7) in 70.0s
+[bench] arm=random_search seed=2 starting...
+  [done] eval_mean=-111.7 (std 55.5) in 73.6s
+[bench] arm=random_search seed=3 starting...
+  [done] eval_mean=-121.5 (std 95.7) in 71.1s
+[bench] arm=random_search seed=4 starting...
+  [done] eval_mean=-111.5 (std 56.0) in 69.8s
+[bench] arm=mlp_ppo seed=0 starting...
+  [done] eval_mean=-500.0 (std 0.0) in 216.6s
+[bench] arm=mlp_ppo seed=1 starting...
+  [done] eval_mean=-500.0 (std 0.0) in 221.7s
+[bench] arm=mlp_ppo seed=2 starting...
+  [done] eval_mean=-489.2 (std 47.1) in 220.9s
+[bench] arm=mlp_ppo seed=3 starting...
+  [done] eval_mean=-500.0 (std 0.0) in 223.2s
+[bench] arm=mlp_ppo seed=4 starting...
+  [done] eval_mean=-500.0 (std 0.0) in 223.1s
+[bench] arm=mlp_es seed=0 starting...
+  [done] eval_mean=-92.3 (std 41.5) in 61.7s
+[bench] arm=mlp_es seed=1 starting...
+  [done] eval_mean=-214.1 (std 81.1) in 111.7s
+[bench] arm=mlp_es seed=2 starting...
+  [done] eval_mean=-88.8 (std 29.1) in 25.9s
+[bench] arm=mlp_es seed=3 starting...
+  [done] eval_mean=-500.0 (std 0.0) in 118.9s
+[bench] arm=mlp_es seed=4 starting...
+  [done] eval_mean=-134.4 (std 76.0) in 58.1s
+[bench] arm=hopf_es seed=0 starting...
+[ade] Building ADE infrastructure (one-time)...
+[cell600] Building 600-cell geometry (one-time computation)...
+  Vertices: 120
+  Neighbor check: All vertices have degree 12
+  Theorem 3: Theorem 3 verified: multiplicities = [1, 4, 9, 16, 25, 36]
+  All scalar multiplicities: [1, 4, 9, 16, 25, 36, 9, 16, 4]
+  Edges: 720
+  Triangles: 1200
+  Theorem 5: Theorem 5 verified: curl multiplicities = [6, 16, 30, 48]
+  McKay: irrep dims [1, 2, 3, 4, 5, 6, 3, 4, 2] → E₈ marks [1, 2, 3, 4, 5, 6, 4, 2, 3] ✓
+  Building face (2-form) eigenspaces from d₁ ∘ curl...
+    Face eigenspaces: [6, 16, 30, 48] (total 100 2-form modes)
+    Berry phase range: [-0.3649, 0.3649] rad
+  Building Ω³ (cell) layer via d₂ and tetrahedra...
+    Tetrahedra: 600
+    d₂ shape: (600, 1200)
+    d₂ ∘ d₁ = 0 check: max |d₂·d₁| = 0.00e+00
+    Cell eigenspaces (non-zero): [4, 9, 16, 25, 36, 24, 16, 24, 9, 36, 40, 25, 48, 18, 16, 30, 24, 8, 8, 24, 48, 25, 30, 36, 16, 4] (total 599 out of 600 cells, 1 harmonic)
+    Cell chirality range: [-3.1831e-02, +3.1831e-02]
+    Cell chirality sign split: +240, -240, 0: 120
+    Cell eigenspaces (non-harmonic): 26 groups, total 599 3-form modes
+[cell600] Geometry construction complete.
+  Group action permutations...
+  Eigenspace decomposition and CG matrices...
+    E0: d=1, copies=1 (dims [1]), V_1 proj dim=0
+    E1: d=2, copies=2 (dims [2, 2]), V_1 proj dim=4
+    E2: d=3, copies=3 (dims [3, 3, 3]), V_1 proj dim=3
+    E3: d=4, copies=4 (dims [4, 4, 4, 4]), V_1 proj dim=8
+    E4: d=5, copies=5 (dims [5, 5, 5, 5, 5]), V_1 proj dim=3
+    E5: d=6, copies=6 (dims [6, 6, 6, 6, 6, 6]), V_1 proj dim=17
+    E6: d=3, copies=3 (dims [3, 3, 3]), V_1 proj dim=0
+    E7: d=4, copies=4 (dims [4, 4, 4, 4]), V_1 proj dim=3
+    E8: d=2, copies=2 (dims [2, 2]), V_1 proj dim=0
+[ade] ADE infrastructure complete.
+  [done] eval_mean=-252.2 (std 48.4) in 328.4s
+/home/user/GENREG_GENOFLOW_HOPF/experiments/multistage_hopf/bench_acrobot.py:132: RuntimeWarning: Degrees of freedom <= 0 for slice
+  va = a.var(ddof=1); vb = b.var(ddof=1)
+/usr/local/lib/python3.11/dist-packages/numpy/_core/_methods.py:211: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+[bench] arm=hopf_es seed=1 starting...
+  [done] eval_mean=-254.3 (std 73.2) in 287.9s
+[bench] arm=hopf_es seed=2 starting...
+  [done] eval_mean=-274.1 (std 83.3) in 314.1s
+[bench] arm=hopf_es seed=3 starting...
+  [done] eval_mean=-245.2 (std 52.2) in 289.4s
+[bench] arm=hopf_es seed=4 starting...
+  [done] eval_mean=-277.5 (std 64.3) in 350.2s
+
+[bench] === Summary ===
+{
+  "random_search": {
+    "n_seeds": 5,
+    "eval_mean_of_means": -106.5,
+    "eval_std_of_means": 12.515590277729617,
+    "per_seed_means": [
+      -98.35,
+      -89.6,
+      -111.65,
+      -121.45,
+      -111.45
+    ],
+    "n_params": 83
+  },
+  "mlp_ppo": {
+    "n_seeds": 5,
+    "eval_mean_of_means": -497.84,
+    "eval_std_of_means": 4.829906831399551,
+    "per_seed_means": [
+      -500.0,
+      -500.0,
+      -489.2,
+      -500.0,
+      -500.0
+    ],
+    "n_params": 83
+  },
+  "mlp_es": {
+    "n_seeds": 5,
+    "eval_mean_of_means": -205.93,
+    "eval_std_of_means": 171.95041654500287,
+    "per_seed_means": [
+      -92.35,
+      -214.05,
+      -88.85,
+      -500.0,
+      -134.4
+    ],
+    "n_params": 83
+  },
+  "hopf_es": {
+    "n_seeds": 5,
+    "eval_mean_of_means": -260.67,
+    "eval_std_of_means": 14.294255839322304,
+    "per_seed_means": [
+      -252.25,
+      -254.3,
+      -274.15,
+      -245.15,
+      -277.5
+    ],
+    "n_params": 84
+  }
+}
+
+[bench] === Welch t-tests (Hopf vs each baseline) ===
+{
+  "hopf_vs_random_search": {
+    "t": -18.1447870874822,
+    "p_two_sided": 1.0659394802225737e-07,
+    "mean_diff": -154.17000000000002,
+    "effect_size_sd_of_baseline": -12.318236421842567
+  },
+  "hopf_vs_mlp_ppo": {
+    "t": 35.14854497431644,
+    "p_two_sided": 4.4219188701870914e-07,
+    "mean_diff": 237.16999999999996,
+    "effect_size_sd_of_baseline": 49.10446687254765
+  },
+  "hopf_vs_mlp_es": {
+    "t": -0.7093998684290089,
+    "p_two_sided": 0.5167361204383751,
+    "mean_diff": -54.74000000000001,
+    "effect_size_sd_of_baseline": -0.3183475858906869
+  }
+}
