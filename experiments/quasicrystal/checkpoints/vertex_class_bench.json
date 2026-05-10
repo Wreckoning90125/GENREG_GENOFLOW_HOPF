@@ -1,0 +1,541 @@
+{
+  "n_vertices": 11965,
+  "n_classes": 6,
+  "n_neighbors": 12,
+  "cutoff": 5,
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "feature_times_s": {
+    "naive": 0.1798546314239502,
+    "steinhardt": 2.261953353881836,
+    "icosahedral": 1.679764747619629,
+    "cell600_ade": 1.034292221069336
+  },
+  "results": {
+    "naive": {
+      "n_features": 12,
+      "test_acc_mean": 0.6394428969359331,
+      "test_acc_std": 0.007581515693015714,
+      "test_acc_per_seed": [
+        0.6437325905292479,
+        0.6409470752089137,
+        0.6298050139275766,
+        0.633983286908078,
+        0.6487465181058496
+      ],
+      "runs": [
+        {
+          "name": "naive",
+          "n_features": 12,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6358208955223881,
+          "train_acc": 0.6478805970149254,
+          "test_acc": 0.6437325905292479
+        },
+        {
+          "name": "naive",
+          "n_features": 12,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.01,
+          "val_acc": 0.6364179104477612,
+          "train_acc": 0.6357014925373135,
+          "test_acc": 0.6409470752089137
+        },
+        {
+          "name": "naive",
+          "n_features": 12,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6483582089552239,
+          "train_acc": 0.6323582089552239,
+          "test_acc": 0.6298050139275766
+        },
+        {
+          "name": "naive",
+          "n_features": 12,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6346268656716418,
+          "train_acc": 0.6305671641791045,
+          "test_acc": 0.633983286908078
+        },
+        {
+          "name": "naive",
+          "n_features": 12,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6447761194029851,
+          "train_acc": 0.6385671641791045,
+          "test_acc": 0.6487465181058496
+        }
+      ]
+    },
+    "steinhardt": {
+      "n_features": 6,
+      "test_acc_mean": 0.5324233983286908,
+      "test_acc_std": 0.010429141964621691,
+      "test_acc_per_seed": [
+        0.5364902506963788,
+        0.532033426183844,
+        0.5373259052924791,
+        0.5147632311977716,
+        0.5415041782729805
+      ],
+      "runs": [
+        {
+          "name": "steinhardt",
+          "n_features": 6,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.5385074626865671,
+          "train_acc": 0.5303880597014925,
+          "test_acc": 0.5364902506963788
+        },
+        {
+          "name": "steinhardt",
+          "n_features": 6,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.5271641791044777,
+          "train_acc": 0.5284776119402985,
+          "test_acc": 0.532033426183844
+        },
+        {
+          "name": "steinhardt",
+          "n_features": 6,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.5373134328358209,
+          "train_acc": 0.5346865671641791,
+          "test_acc": 0.5373259052924791
+        },
+        {
+          "name": "steinhardt",
+          "n_features": 6,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.01,
+          "val_acc": 0.5229850746268657,
+          "train_acc": 0.5189253731343284,
+          "test_acc": 0.5147632311977716
+        },
+        {
+          "name": "steinhardt",
+          "n_features": 6,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.5086567164179104,
+          "train_acc": 0.5245373134328358,
+          "test_acc": 0.5415041782729805
+        }
+      ]
+    },
+    "icosahedral": {
+      "n_features": 3,
+      "test_acc_mean": 0.478941504178273,
+      "test_acc_std": 0.008096223788115866,
+      "test_acc_per_seed": [
+        0.48746518105849584,
+        0.48245125348189416,
+        0.4735376044568245,
+        0.46768802228412254,
+        0.48356545961002784
+      ],
+      "runs": [
+        {
+          "name": "icosahedral",
+          "n_features": 3,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.1,
+          "val_acc": 0.4919402985074627,
+          "train_acc": 0.48441791044776117,
+          "test_acc": 0.48746518105849584
+        },
+        {
+          "name": "icosahedral",
+          "n_features": 3,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.4597014925373134,
+          "train_acc": 0.4722388059701493,
+          "test_acc": 0.48245125348189416
+        },
+        {
+          "name": "icosahedral",
+          "n_features": 3,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.1,
+          "val_acc": 0.4847761194029851,
+          "train_acc": 0.48035820895522385,
+          "test_acc": 0.4735376044568245
+        },
+        {
+          "name": "icosahedral",
+          "n_features": 3,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.4961194029850746,
+          "train_acc": 0.48214925373134326,
+          "test_acc": 0.46768802228412254
+        },
+        {
+          "name": "icosahedral",
+          "n_features": 3,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.1,
+          "val_acc": 0.49791044776119403,
+          "train_acc": 0.4881194029850746,
+          "test_acc": 0.48356545961002784
+        }
+      ]
+    },
+    "cell600_ade_norms": {
+      "n_features": 9,
+      "test_acc_mean": 0.30473537604456824,
+      "test_acc_std": 0.0014870582523720493,
+      "test_acc_per_seed": [
+        0.3050139275766017,
+        0.30557103064066854,
+        0.3064066852367688,
+        0.30250696378830083,
+        0.3041782729805014
+      ],
+      "runs": [
+        {
+          "name": "cell600_ade_norms",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.3164179104477612,
+          "train_acc": 0.31343283582089554,
+          "test_acc": 0.3050139275766017
+        },
+        {
+          "name": "cell600_ade_norms",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.3092537313432836,
+          "train_acc": 0.31008955223880597,
+          "test_acc": 0.30557103064066854
+        },
+        {
+          "name": "cell600_ade_norms",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.31522388059701495,
+          "train_acc": 0.3071044776119403,
+          "test_acc": 0.3064066852367688
+        },
+        {
+          "name": "cell600_ade_norms",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.32,
+          "train_acc": 0.32,
+          "test_acc": 0.30250696378830083
+        },
+        {
+          "name": "cell600_ade_norms",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.3062686567164179,
+          "train_acc": 0.3177313432835821,
+          "test_acc": 0.3041782729805014
+        }
+      ]
+    },
+    "cell600_ade_coeffs": {
+      "n_features": 30,
+      "test_acc_mean": 0.23571030640668522,
+      "test_acc_std": 0.007042452632004674,
+      "test_acc_per_seed": [
+        0.233983286908078,
+        0.24122562674094708,
+        0.23537604456824512,
+        0.22506963788300835,
+        0.24289693593314762
+      ],
+      "runs": [
+        {
+          "name": "cell600_ade_coeffs",
+          "n_features": 30,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.2244776119402985,
+          "train_acc": 0.2565970149253731,
+          "test_acc": 0.233983286908078
+        },
+        {
+          "name": "cell600_ade_coeffs",
+          "n_features": 30,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.2435820895522388,
+          "train_acc": 0.2565970149253731,
+          "test_acc": 0.24122562674094708
+        },
+        {
+          "name": "cell600_ade_coeffs",
+          "n_features": 30,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.2638805970149254,
+          "train_acc": 0.25397014925373135,
+          "test_acc": 0.23537604456824512
+        },
+        {
+          "name": "cell600_ade_coeffs",
+          "n_features": 30,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.01,
+          "val_acc": 0.2417910447761194,
+          "train_acc": 0.25122388059701495,
+          "test_acc": 0.22506963788300835
+        },
+        {
+          "name": "cell600_ade_coeffs",
+          "n_features": 30,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.2346268656716418,
+          "train_acc": 0.2536119402985075,
+          "test_acc": 0.24289693593314762
+        }
+      ]
+    },
+    "steinhardt+icosahedral": {
+      "n_features": 9,
+      "test_acc_mean": 0.5333147632311979,
+      "test_acc_std": 0.008842859574535521,
+      "test_acc_per_seed": [
+        0.5242339832869081,
+        0.5337047353760446,
+        0.5448467966573816,
+        0.5250696378830083,
+        0.5387186629526463
+      ],
+      "runs": [
+        {
+          "name": "steinhardt+icosahedral",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.5402985074626866,
+          "train_acc": 0.5239402985074627,
+          "test_acc": 0.5242339832869081
+        },
+        {
+          "name": "steinhardt+icosahedral",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.01,
+          "val_acc": 0.528955223880597,
+          "train_acc": 0.5348059701492537,
+          "test_acc": 0.5337047353760446
+        },
+        {
+          "name": "steinhardt+icosahedral",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.01,
+          "val_acc": 0.546865671641791,
+          "train_acc": 0.5469850746268656,
+          "test_acc": 0.5448467966573816
+        },
+        {
+          "name": "steinhardt+icosahedral",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.01,
+          "val_acc": 0.5182089552238806,
+          "train_acc": 0.5263283582089552,
+          "test_acc": 0.5250696378830083
+        },
+        {
+          "name": "steinhardt+icosahedral",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.5080597014925373,
+          "train_acc": 0.5222686567164179,
+          "test_acc": 0.5387186629526463
+        }
+      ]
+    },
+    "naive+steinhardt": {
+      "n_features": 18,
+      "test_acc_mean": 0.6769916434540391,
+      "test_acc_std": 0.0041624584651850805,
+      "test_acc_per_seed": [
+        0.675208913649025,
+        0.6740947075208914,
+        0.6743732590529248,
+        0.677158774373259,
+        0.6841225626740947
+      ],
+      "runs": [
+        {
+          "name": "naive+steinhardt",
+          "n_features": 18,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6734328358208955,
+          "train_acc": 0.6846567164179105,
+          "test_acc": 0.675208913649025
+        },
+        {
+          "name": "naive+steinhardt",
+          "n_features": 18,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6650746268656716,
+          "train_acc": 0.676179104477612,
+          "test_acc": 0.6740947075208914
+        },
+        {
+          "name": "naive+steinhardt",
+          "n_features": 18,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6764179104477612,
+          "train_acc": 0.6757014925373135,
+          "test_acc": 0.6743732590529248
+        },
+        {
+          "name": "naive+steinhardt",
+          "n_features": 18,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6632835820895523,
+          "train_acc": 0.6740298507462686,
+          "test_acc": 0.677158774373259
+        },
+        {
+          "name": "naive+steinhardt",
+          "n_features": 18,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6746268656716418,
+          "train_acc": 0.6768955223880597,
+          "test_acc": 0.6841225626740947
+        }
+      ]
+    },
+    "naive+ade_coeffs": {
+      "n_features": 42,
+      "test_acc_mean": 0.6345961002785515,
+      "test_acc_std": 0.0047329175987620075,
+      "test_acc_per_seed": [
+        0.6275766016713092,
+        0.6362116991643454,
+        0.6337047353760445,
+        0.6348189415041783,
+        0.6406685236768802
+      ],
+      "runs": [
+        {
+          "name": "naive+ade_coeffs",
+          "n_features": 42,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6328358208955224,
+          "train_acc": 0.6386865671641792,
+          "test_acc": 0.6275766016713092
+        },
+        {
+          "name": "naive+ade_coeffs",
+          "n_features": 42,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6274626865671642,
+          "train_acc": 0.6335522388059701,
+          "test_acc": 0.6362116991643454
+        },
+        {
+          "name": "naive+ade_coeffs",
+          "n_features": 42,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.64,
+          "train_acc": 0.6360597014925373,
+          "test_acc": 0.6337047353760445
+        },
+        {
+          "name": "naive+ade_coeffs",
+          "n_features": 42,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6364179104477612,
+          "train_acc": 0.6370149253731343,
+          "test_acc": 0.6348189415041783
+        },
+        {
+          "name": "naive+ade_coeffs",
+          "n_features": 42,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6316417910447761,
+          "train_acc": 0.636179104477612,
+          "test_acc": 0.6406685236768802
+        }
+      ]
+    }
+  },
+  "class_counts": [
+    1999,
+    2020,
+    2014,
+    1978,
+    1986,
+    1968
+  ]
+}
