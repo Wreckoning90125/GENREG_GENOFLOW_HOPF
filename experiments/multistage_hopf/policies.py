@@ -102,13 +102,13 @@ class HopfPolicy:
     Total learnable d.o.f.: 12 rotor + 72 readout = 84.
     """
 
-    K = 2
     EIG_INDICES = (3, 7)  # E3 and E7, the two dim-4 eigenspaces
     KAPPA_BASE = 8.0
     KAPPA_VEL = 0.5  # added to base kappa per unit angular velocity (capped)
     READOUT_OUT = 3   # number of Acrobot actions
 
-    def __init__(self) -> None:
+    def __init__(self, K: int = 2) -> None:
+        self.K = int(K)
         ade = _get_ade_cached()
         self.eigspaces = [ade["ade_eigenspaces"][i] for i in self.EIG_INDICES]
         # Each V is (120, 16); 16 = 4 copies x 4 irrep coords.

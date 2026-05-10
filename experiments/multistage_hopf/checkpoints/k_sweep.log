@@ -1,0 +1,158 @@
+[bench-K] K_values=(0, 1, 2) seeds=[0, 1, 2, 3, 4, 5, 6]
+[bench-K] K=0 seed=0 starting...
+[ade] Building ADE infrastructure (one-time)...
+[cell600] Building 600-cell geometry (one-time computation)...
+  Vertices: 120
+  Neighbor check: All vertices have degree 12
+  Theorem 3: Theorem 3 verified: multiplicities = [1, 4, 9, 16, 25, 36]
+  All scalar multiplicities: [1, 4, 9, 16, 25, 36, 9, 16, 4]
+  Edges: 720
+  Triangles: 1200
+  Theorem 5: Theorem 5 verified: curl multiplicities = [6, 16, 30, 48]
+  McKay: irrep dims [1, 2, 3, 4, 5, 6, 3, 4, 2] → E₈ marks [1, 2, 3, 4, 5, 6, 4, 2, 3] ✓
+  Building face (2-form) eigenspaces from d₁ ∘ curl...
+    Face eigenspaces: [6, 16, 30, 48] (total 100 2-form modes)
+    Berry phase range: [-0.3649, 0.3649] rad
+  Building Ω³ (cell) layer via d₂ and tetrahedra...
+    Tetrahedra: 600
+    d₂ shape: (600, 1200)
+    d₂ ∘ d₁ = 0 check: max |d₂·d₁| = 0.00e+00
+    Cell eigenspaces (non-zero): [4, 9, 16, 25, 36, 24, 16, 24, 9, 36, 40, 25, 48, 18, 16, 30, 24, 8, 8, 24, 48, 25, 30, 36, 16, 4] (total 599 out of 600 cells, 1 harmonic)
+    Cell chirality range: [-3.1831e-02, +3.1831e-02]
+    Cell chirality sign split: +240, -240, 0: 120
+    Cell eigenspaces (non-harmonic): 26 groups, total 599 3-form modes
+[cell600] Geometry construction complete.
+  Group action permutations...
+  Eigenspace decomposition and CG matrices...
+    E0: d=1, copies=1 (dims [1]), V_1 proj dim=0
+    E1: d=2, copies=2 (dims [2, 2]), V_1 proj dim=4
+    E2: d=3, copies=3 (dims [3, 3, 3]), V_1 proj dim=3
+    E3: d=4, copies=4 (dims [4, 4, 4, 4]), V_1 proj dim=8
+    E4: d=5, copies=5 (dims [5, 5, 5, 5, 5]), V_1 proj dim=3
+    E5: d=6, copies=6 (dims [6, 6, 6, 6, 6, 6]), V_1 proj dim=17
+    E6: d=3, copies=3 (dims [3, 3, 3]), V_1 proj dim=0
+    E7: d=4, copies=4 (dims [4, 4, 4, 4]), V_1 proj dim=3
+    E8: d=2, copies=2 (dims [2, 2]), V_1 proj dim=0
+[ade] ADE infrastructure complete.
+  [done] eval_mean=-196.7 (std 93.7, median -159.0) train=235s
+[bench-K] K=0 seed=1 starting...
+  [done] eval_mean=-187.9 (std 73.4, median -165.5) train=208s
+[bench-K] K=0 seed=2 starting...
+  [done] eval_mean=-218.2 (std 96.7, median -183.5) train=226s
+[bench-K] K=0 seed=3 starting...
+  [done] eval_mean=-217.4 (std 48.5, median -213.0) train=298s
+[bench-K] K=0 seed=4 starting...
+  [done] eval_mean=-228.9 (std 89.6, median -196.5) train=228s
+[bench-K] K=0 seed=5 starting...
+  [done] eval_mean=-238.8 (std 50.3, median -237.0) train=270s
+[bench-K] K=0 seed=6 starting...
+  [done] eval_mean=-208.9 (std 85.2, median -180.5) train=214s
+[bench-K] K=1 seed=0 starting...
+  [done] eval_mean=-215.4 (std 60.5, median -195.0) train=331s
+/home/user/GENREG_GENOFLOW_HOPF/experiments/multistage_hopf/bench_acrobot.py:132: RuntimeWarning: Degrees of freedom <= 0 for slice
+  va = a.var(ddof=1); vb = b.var(ddof=1)
+/usr/local/lib/python3.11/dist-packages/numpy/_core/_methods.py:211: RuntimeWarning: invalid value encountered in scalar divide
+  ret = ret.dtype.type(ret / rcount)
+[bench-K] K=1 seed=1 starting...
+  [done] eval_mean=-238.6 (std 70.7, median -228.5) train=374s
+[bench-K] K=1 seed=2 starting...
+  [done] eval_mean=-203.6 (std 74.6, median -187.5) train=378s
+[bench-K] K=1 seed=3 starting...
+  [done] eval_mean=-232.5 (std 78.3, median -211.5) train=361s
+[bench-K] K=1 seed=4 starting...
+  [done] eval_mean=-202.8 (std 83.4, median -178.5) train=376s
+[bench-K] K=1 seed=5 starting...
+  [done] eval_mean=-226.1 (std 80.4, median -208.5) train=326s
+[bench-K] K=1 seed=6 starting...
+  [done] eval_mean=-222.6 (std 68.5, median -204.5) train=319s
+[bench-K] K=2 seed=0 starting...
+  [done] eval_mean=-244.8 (std 60.6, median -238.5) train=499s
+[bench-K] K=2 seed=1 starting...
+  [done] eval_mean=-192.0 (std 55.3, median -184.0) train=441s
+[bench-K] K=2 seed=2 starting...
+  [done] eval_mean=-192.8 (std 31.5, median -194.0) train=485s
+[bench-K] K=2 seed=3 starting...
+  [done] eval_mean=-231.3 (std 64.3, median -214.0) train=452s
+[bench-K] K=2 seed=4 starting...
+  [done] eval_mean=-212.3 (std 74.8, median -201.0) train=503s
+[bench-K] K=2 seed=5 starting...
+  [done] eval_mean=-216.8 (std 84.0, median -190.0) train=445s
+[bench-K] K=2 seed=6 starting...
+  [done] eval_mean=-242.5 (std 45.0, median -244.0) train=485s
+
+[bench-K] === Aggregate ===
+{
+  "K=0": {
+    "n_seeds": 7,
+    "eval_mean_of_means": -213.85714285714286,
+    "eval_std_of_means": 17.684655037900054,
+    "eval_median_of_means": -217.45,
+    "per_seed_means": [
+      -196.65,
+      -187.95,
+      -218.25,
+      -217.45,
+      -228.95,
+      -238.85,
+      -208.9
+    ],
+    "n_params": 72,
+    "mean_train_time_s": 239.82400567190987
+  },
+  "K=1": {
+    "n_seeds": 7,
+    "eval_mean_of_means": -220.22857142857137,
+    "eval_std_of_means": 13.727310283484075,
+    "eval_median_of_means": -222.6,
+    "per_seed_means": [
+      -215.45,
+      -238.6,
+      -203.55,
+      -232.5,
+      -202.85,
+      -226.05,
+      -222.6
+    ],
+    "n_params": 78,
+    "mean_train_time_s": 351.8735601220812
+  },
+  "K=2": {
+    "n_seeds": 7,
+    "eval_mean_of_means": -218.94285714285712,
+    "eval_std_of_means": 21.73264496426648,
+    "eval_median_of_means": -216.75,
+    "per_seed_means": [
+      -244.85,
+      -192.0,
+      -192.85,
+      -231.3,
+      -212.35,
+      -216.75,
+      -242.5
+    ],
+    "n_params": 84,
+    "mean_train_time_s": 472.95575955935885
+  }
+}
+
+[bench-K] === Pairwise (Welch t, K_higher vs K_lower) ===
+{
+  "K=1_vs_K=0": {
+    "t": -0.7529850301967702,
+    "p_two_sided": 0.46685092966090336,
+    "mean_diff": -6.37142857142851,
+    "effect_size_sd_of_lower_K": -0.36028005962081344
+  },
+  "K=2_vs_K=0": {
+    "t": -0.48023185984678896,
+    "p_two_sided": 0.640049189115174,
+    "mean_diff": -5.0857142857142605,
+    "effect_size_sd_of_lower_K": -0.2875778054372426
+  },
+  "K=2_vs_K=1": {
+    "t": 0.13233536536043228,
+    "p_two_sided": 0.8973107015258444,
+    "mean_diff": 1.2857142857142492,
+    "effect_size_sd_of_lower_K": 0.09366104933615833
+  }
+}
