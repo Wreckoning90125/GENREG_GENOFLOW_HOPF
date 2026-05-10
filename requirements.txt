@@ -9,6 +9,16 @@ networkx>=3.0
 h5py>=3.8.0
 pyvista>=0.42.0
 pytest>=7.0.0
+mpmath>=1.3.0
+
+# Crystallography stack — see AGENTS.md for usage policy.
+# Hard requirement: any new symmetry / rep-theory / structure /
+# CIF work goes through these. Do not roll our own.
+spglib>=2.5.0
+moyopy>=0.4.0
+spgrep>=0.4.0
+pyxtal>=1.0.0
+gemmi>=0.6.0
 
 
 
