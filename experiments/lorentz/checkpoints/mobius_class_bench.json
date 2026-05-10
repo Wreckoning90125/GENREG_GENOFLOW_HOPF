@@ -1,0 +1,86 @@
+{
+  "n_classes": 5,
+  "n_samples_per_class": 200,
+  "task_A_mobius_equivalence": {
+    "pairwise_distances (rot-inv)": {
+      "name": "pairwise_distances (rot-inv)",
+      "n_features": 6,
+      "test_acc_mean": 0.32933333333333337,
+      "test_acc_std": 0.030037014202850168,
+      "per_seed": [
+        0.33,
+        0.29,
+        0.36,
+        0.3566666666666667,
+        0.31
+      ]
+    },
+    "cross_ratio (M\u00f6bius-inv)": {
+      "name": "cross_ratio (M\u00f6bius-inv)",
+      "n_features": 2,
+      "test_acc_mean": 0.9153333333333332,
+      "test_acc_std": 0.11594059781725391,
+      "per_seed": [
+        1.0,
+        0.79,
+        0.7866666666666666,
+        1.0,
+        1.0
+      ]
+    },
+    "all_6_cross_ratios (S\u2084-sym, M\u00f6bius-inv)": {
+      "name": "all_6_cross_ratios (S\u2084-sym, M\u00f6bius-inv)",
+      "n_features": 12,
+      "test_acc_mean": 1.0,
+      "test_acc_std": 0.0,
+      "per_seed": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  },
+  "task_B_rotation_only": {
+    "pairwise_distances (rot-inv)": {
+      "name": "pairwise_distances (rot-inv)",
+      "n_features": 6,
+      "test_acc_mean": 1.0,
+      "test_acc_std": 0.0,
+      "per_seed": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "cross_ratio (M\u00f6bius-inv)": {
+      "name": "cross_ratio (M\u00f6bius-inv)",
+      "n_features": 2,
+      "test_acc_mean": 0.9153333333333332,
+      "test_acc_std": 0.11594059781725391,
+      "per_seed": [
+        1.0,
+        0.79,
+        0.7866666666666666,
+        1.0,
+        1.0
+      ]
+    },
+    "all_6_cross_ratios": {
+      "name": "all_6_cross_ratios",
+      "n_features": 12,
+      "test_acc_mean": 1.0,
+      "test_acc_std": 0.0,
+      "per_seed": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    }
+  }
+}
