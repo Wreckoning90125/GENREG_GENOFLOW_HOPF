@@ -11,10 +11,10 @@
     4
   ],
   "feature_times_s": {
-    "naive": 0.1798546314239502,
-    "steinhardt": 2.261953353881836,
-    "icosahedral": 1.679764747619629,
-    "cell600_ade": 1.034292221069336
+    "naive": 0.21516990661621094,
+    "steinhardt": 2.191174030303955,
+    "icosahedral": 1.601064920425415,
+    "cell600_ade": 1.1849000453948975
   },
   "results": {
     "naive": {
@@ -337,6 +337,70 @@
         }
       ]
     },
+    "ssg_irrep (A+T1+H)": {
+      "n_features": 9,
+      "test_acc_mean": 0.2942061281337047,
+      "test_acc_std": 0.027396219366209767,
+      "test_acc_per_seed": [
+        0.29192200557103065,
+        0.3064066852367688,
+        0.32284122562674095,
+        0.24958217270194985,
+        0.3002785515320334
+      ],
+      "runs": [
+        {
+          "name": "ssg_irrep (A+T1+H)",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.32298507462686565,
+          "train_acc": 0.3067462686567164,
+          "test_acc": 0.29192200557103065
+        },
+        {
+          "name": "ssg_irrep (A+T1+H)",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 1.0,
+          "val_acc": 0.3164179104477612,
+          "train_acc": 0.3195223880597015,
+          "test_acc": 0.3064066852367688
+        },
+        {
+          "name": "ssg_irrep (A+T1+H)",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.30507462686567166,
+          "train_acc": 0.3426865671641791,
+          "test_acc": 0.32284122562674095
+        },
+        {
+          "name": "ssg_irrep (A+T1+H)",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 1.0,
+          "val_acc": 0.3528358208955224,
+          "train_acc": 0.28071641791044777,
+          "test_acc": 0.24958217270194985
+        },
+        {
+          "name": "ssg_irrep (A+T1+H)",
+          "n_features": 9,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 1.0,
+          "val_acc": 0.2949253731343284,
+          "train_acc": 0.30388059701492537,
+          "test_acc": 0.3002785515320334
+        }
+      ]
+    },
     "steinhardt+icosahedral": {
       "n_features": 9,
       "test_acc_mean": 0.5333147632311979,
@@ -526,6 +590,70 @@
           "val_acc": 0.6316417910447761,
           "train_acc": 0.636179104477612,
           "test_acc": 0.6406685236768802
+        }
+      ]
+    },
+    "naive+ssg": {
+      "n_features": 21,
+      "test_acc_mean": 0.6362116991643454,
+      "test_acc_std": 0.003742347867004022,
+      "test_acc_per_seed": [
+        0.6342618384401114,
+        0.6373259052924791,
+        0.6317548746518106,
+        0.635933147632312,
+        0.6417827298050139
+      ],
+      "runs": [
+        {
+          "name": "naive+ssg",
+          "n_features": 21,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6340298507462686,
+          "train_acc": 0.6389253731343284,
+          "test_acc": 0.6342618384401114
+        },
+        {
+          "name": "naive+ssg",
+          "n_features": 21,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6334328358208955,
+          "train_acc": 0.6341492537313432,
+          "test_acc": 0.6373259052924791
+        },
+        {
+          "name": "naive+ssg",
+          "n_features": 21,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6417910447761194,
+          "train_acc": 0.637731343283582,
+          "test_acc": 0.6317548746518106
+        },
+        {
+          "name": "naive+ssg",
+          "n_features": 21,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6364179104477612,
+          "train_acc": 0.633910447761194,
+          "test_acc": 0.635933147632312
+        },
+        {
+          "name": "naive+ssg",
+          "n_features": 21,
+          "n_train": 8375,
+          "n_test": 3590,
+          "best_lam": 0.001,
+          "val_acc": 0.6411940298507462,
+          "train_acc": 0.6325970149253731,
+          "test_acc": 0.6417827298050139
         }
       ]
     }

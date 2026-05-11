@@ -239,6 +239,61 @@ def cell600_irrep_features(qc: IcosahedralQC, n_neighbors: int = 12,
     return out
 
 
+def ssg_irrep_features(qc: IcosahedralQC, n_neighbors: int = 12) -> np.ndarray:
+    """Features built by decomposing the local 3D physical neighborhood
+    into icosahedral-group irreducible components.
+
+    By Cartesian-tensor decomposition under SO(3), a degree-2 outer
+    product of vectors splits as (scalar) ⊕ (antisymmetric vector) ⊕
+    (traceless symmetric tensor). Restricting to the icosahedral
+    subgroup I ⊂ SO(3), the SAME decomposition applies — but the
+    components carry the I irrep labels A (scalar), T1 (vector), and
+    H (5-d traceless-symmetric tensor) respectively.
+
+    For each vertex this routine emits:
+      - 1 scalar  (A irrep):    mean squared neighbor distance
+      - 3 vector  (T1 irrep):   mean physical displacement (centroid)
+      - 5 tensor  (H irrep):    flattened upper-triangular components
+                                of the traceless symmetric mean
+                                outer-product
+
+    Total 9 features per vertex. Direction-aware (the T1 component
+    transforms as a 3-vector under rotation — equivariant, not
+    invariant). This is the SSG-character-formula analog of the
+    ad-hoc `cell600_irrep_coeffs` features, but written purely in
+    terms of the icosahedral irrep structure rather than the
+    600-cell vertex set.
+
+    Reference: Janssen-Janner-Looijenga-Vos for the SSG framework;
+    Stokes & Campbell 2011 for the (3+d)D classification.
+    """
+    _, vecs = _nearest_neighbors(qc.physical, n_neighbors)  # (N, k, 3)
+    N = qc.physical.shape[0]
+
+    # A irrep (scalar): mean squared distance.
+    sq = (vecs * vecs).sum(axis=-1)            # (N, k)
+    scalar_A = sq.mean(axis=1, keepdims=True)  # (N, 1)
+
+    # T1 irrep (vector): mean displacement.
+    vec_T1 = vecs.mean(axis=1)                  # (N, 3)
+
+    # H irrep (traceless symmetric tensor): mean Δ_i Δ_j outer-product,
+    # subtract trace/3 · I to make traceless. 6 unique components, but
+    # the trace constraint reduces to 5 independent.
+    outer = np.einsum("nki,nkj->nij", vecs, vecs) / vecs.shape[1]  # (N, 3, 3)
+    trace = np.trace(outer, axis1=1, axis2=2) / 3.0
+    sym_tr_free = outer - trace[:, None, None] * np.eye(3)
+    tensor_H = np.stack([
+        sym_tr_free[:, 0, 0],
+        sym_tr_free[:, 1, 1],
+        sym_tr_free[:, 0, 1],
+        sym_tr_free[:, 0, 2],
+        sym_tr_free[:, 1, 2],
+    ], axis=1)  # (N, 5)
+
+    return np.concatenate([scalar_A, vec_T1, tensor_H], axis=1)  # (N, 9)
+
+
 def cell600_irrep_coeffs(qc: IcosahedralQC, n_neighbors: int = 12,
                           kappa: float = 8.0,
                           eig_indices=(0, 1, 2, 3)) -> np.ndarray:

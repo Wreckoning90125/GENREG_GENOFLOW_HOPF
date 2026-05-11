@@ -282,6 +282,96 @@ def test_icosahedral_invariant_counts_match_molien():
         assert n == exp, f"l={l}: got {n}, expected {exp} (Molien)"
 
 
+# ---------------------------------------------------------------------------
+# 5. Superspace group (SSG) of the icosahedral QC
+# ---------------------------------------------------------------------------
+
+
+def test_ssg_has_60_integer_matrices():
+    """The icosahedral (3+3)D SSG has exactly 60 elements (= |I|),
+    each a 6×6 INTEGER matrix acting on Z⁶."""
+    from experiments.quasicrystal.ssg_decomposition import ssg_rotation_matrices
+    SSG = ssg_rotation_matrices()
+    assert SSG.shape == (60, 6, 6), f"got shape {SSG.shape}"
+    assert SSG.dtype.kind == "i", f"expected integer dtype, got {SSG.dtype}"
+
+
+def test_ssg_all_proper_rotations_in_6d():
+    """All 60 SSG matrices have det = +1 in 6D (proper rotations of Z⁶)."""
+    from experiments.quasicrystal.ssg_decomposition import ssg_rotation_matrices
+    SSG = ssg_rotation_matrices()
+    for k in range(60):
+        d = int(round(np.linalg.det(SSG[k].astype(np.float64))))
+        assert d == 1, f"M_{k} has det {d}"
+
+
+def test_ssg_closed_under_multiplication():
+    """The 60 matrices are closed under matrix multiplication —
+    they form a faithful representation of the icosahedral group I."""
+    from experiments.quasicrystal.ssg_decomposition import (
+        ssg_rotation_matrices, verify_group_closure,
+    )
+    SSG = ssg_rotation_matrices()
+    assert verify_group_closure(SSG)
+
+
+def test_ssg_acts_on_physical_3d_as_proper_rotation():
+    """Each SSG element induces a proper rotation in physical 3D via
+    R = P_phys M P_phys^T to machine precision."""
+    from experiments.quasicrystal.ssg_decomposition import (
+        ssg_rotation_matrices, verify_acts_on_phys_as_rotation,
+    )
+    SSG = ssg_rotation_matrices()
+    acts = verify_acts_on_phys_as_rotation(SSG)
+    assert acts[:, 1].max() < 1e-12, (
+        f"max phys-rotation residual {acts[:, 1].max():.2e}"
+    )
+    assert np.all(np.abs(acts[:, 0] - 1.0) < 1e-9), "non-+1 det in phys"
+
+
+def test_ssg_6d_rep_decomposes_as_T1_plus_T2():
+    """The 6D representation of the icosahedral SSG decomposes as
+
+        ρ_6D = T1 ⊕ T2
+
+    one copy of each 3D irrep of I, no other component. This is the
+    canonical "physical ⊕ perp" split that makes the cut-and-project
+    a clean physical/perp decomposition. Verified via the character
+    formula at 30-digit mpmath precision.
+    """
+    from experiments.quasicrystal.ssg_decomposition import (
+        ssg_rotation_matrices, decompose_6d_rep_via_mpmath,
+    )
+    SSG = ssg_rotation_matrices()
+    mults = decompose_6d_rep_via_mpmath(SSG, prec=30)
+    expected = {"A": 0, "T1": 1, "T2": 1, "G": 0, "H": 0}
+    assert mults == expected, (
+        f"6D rep decomposition mismatch: got {mults}, expected {expected}"
+    )
+
+
+def test_ssg_character_class_function():
+    """χ_6D is constant within each conjugacy class (= it is a
+    proper class function). Specifically:
+        χ_6D = (E: 6, C5: 1, C5²: 1, C3: 0, C2: −2)
+    and these match χ_T1 + χ_T2 from the published character table."""
+    from experiments.quasicrystal.ssg_decomposition import (
+        ssg_rotation_matrices, char_on_6d_rep,
+    )
+    from experiments.quasicrystal.icosahedral_group import character_table_mp
+    SSG = ssg_rotation_matrices()
+    chi6 = char_on_6d_rep(SSG)
+    expected = {0: 6, 1: 1, 2: 1, 3: 0, 4: -2}
+    assert chi6 == expected, f"χ_6D mismatch: {chi6}"
+    # Cross-check: χ_T1 + χ_T2 at each class should equal χ_6D.
+    chi_tab = character_table_mp(prec=30)
+    for cls in range(5):
+        s = float(chi_tab[1][cls] + chi_tab[2][cls])  # T1 + T2
+        assert abs(s - expected[cls]) < 1e-12, (
+            f"χ_T1 + χ_T2 mismatch at class {cls}: {s} vs {expected[cls]}"
+        )
+
+
 def test_spgrep_crystallographic_pointgroup_works():
     """spgrep covers the 32 crystallographic point groups; verify it
     returns sensible irreps for one (m-3m, the cubic one which

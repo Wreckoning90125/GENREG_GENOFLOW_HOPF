@@ -1,0 +1,83 @@
+{
+  "task": "stabilizer_class_classification_balanced_binary",
+  "n_total_vertices": 11965,
+  "n_high_symmetry": 445,
+  "n_balanced_dataset": 890,
+  "n_neighbors": 12,
+  "cutoff": 5,
+  "label_meaning": "1 = on high-symmetry axis (stab > 1), 0 = generic",
+  "results": {
+    "naive (rot-inv)": {
+      "n_features": 12,
+      "test_acc_mean": 0.8112359550561798,
+      "test_acc_std": 0.022874054658580494,
+      "test_acc_per_seed": [
+        0.8239700374531835,
+        0.7752808988764045,
+        0.8052434456928839,
+        0.8164794007490637,
+        0.8352059925093633
+      ]
+    },
+    "steinhardt (rot-inv)": {
+      "n_features": 6,
+      "test_acc_mean": 0.7940074906367041,
+      "test_acc_std": 0.017765604832406624,
+      "test_acc_per_seed": [
+        0.7902621722846442,
+        0.7827715355805244,
+        0.7940074906367042,
+        0.7790262172284644,
+        0.8239700374531835
+      ]
+    },
+    "icosahedral Q_l (rot-inv)": {
+      "n_features": 3,
+      "test_acc_mean": 0.7865168539325843,
+      "test_acc_std": 0.01695765007141837,
+      "test_acc_per_seed": [
+        0.8014981273408239,
+        0.7677902621722846,
+        0.7715355805243446,
+        0.7865168539325843,
+        0.8052434456928839
+      ]
+    },
+    "cell600_ade_norms (rot-inv)": {
+      "n_features": 9,
+      "test_acc_mean": 0.647940074906367,
+      "test_acc_std": 0.033499145730333926,
+      "test_acc_per_seed": [
+        0.6891385767790262,
+        0.6217228464419475,
+        0.6104868913857678,
+        0.6741573033707865,
+        0.6441947565543071
+      ]
+    },
+    "ssg_irrep A+T1+H (direction-aware)": {
+      "n_features": 9,
+      "test_acc_mean": 0.5071161048689139,
+      "test_acc_std": 0.033561897853512886,
+      "test_acc_per_seed": [
+        0.5543071161048689,
+        0.4606741573033708,
+        0.49812734082397003,
+        0.5093632958801498,
+        0.5131086142322098
+      ]
+    },
+    "steinhardt+icos": {
+      "n_features": 9,
+      "test_acc_mean": 0.7932584269662921,
+      "test_acc_std": 0.017446913406520017,
+      "test_acc_per_seed": [
+        0.7827715355805244,
+        0.7827715355805244,
+        0.7865168539325843,
+        0.7902621722846442,
+        0.8239700374531835
+      ]
+    }
+  }
+}

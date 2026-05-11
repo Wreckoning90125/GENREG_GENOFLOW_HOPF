@@ -136,14 +136,64 @@ to end at cutoff=5 (~12k vertices).
   for classification, ridge regression for the regression task.
 - `tests/test_qc_canonical.py` — the 17 verification tests.
 
-## Coverage gap acknowledged
+## SSG (superspace group) decomposition — `ssg_decomposition.py`
 
-This subdirectory is the "roll our own with verification" path
-flagged in `AGENTS.md`. The quasicrystal / superspace tooling
-ecosystem is genuinely sparse — there is no Python equivalent of
-`spgrep` for (3+d)D superspace groups, and the rep theory for SSGs
-lives behind ISOTROPY/Bilbao web forms or in JANA2020. What's here
-is a 3D icosahedral cut-and-project (no SSG yet); extending to a
-real (3+d)D Bloch decomposition with `mpmath`-precision irreps
-would be a follow-up, with the canonical-tables verification path
-named in `AGENTS.md` for the SSG case.
+The cut-and-project construction is implicitly using a (3+3)-
+dimensional SSG (the icosahedral group I acting on Z⁶ via signed
+permutations of the 6 lattice basis vectors). `ssg_decomposition.py`
+makes this explicit:
+
+- Builds the 60 6×6 INTEGER matrices for I acting on Z⁶.
+- Verifies they are closed under multiplication, all det = +1, and
+  induce proper rotations in physical 3D to machine precision.
+- Decomposes the 6D representation via the character formula at
+  30-digit `mpmath` precision and confirms
+
+      ρ_6D = T1 ⊕ T2
+
+  — one copy of each 3D irrep of I. This is the canonical
+  physical-⊕-perpendicular split that makes the cut-and-project
+  a clean orthogonal decomposition.
+- Provides `project_function_onto_irrep(...)` for irrep-block
+  projection of functions on Z⁶.
+
+The SSG matrices also enable **canonical orbit-based labels**:
+each QC vertex belongs to an SSG orbit (size ∈ {1, 12, 20, 30, 60}),
+and the orbit size encodes the local rotational stabilizer
+(full-I / C₅ / C₃ / C₂ / trivial).
+
+### Stabilizer-class classification task
+
+Predict whether a QC vertex is on a high-symmetry axis (orbit size
+< 60) or generic (orbit size = 60), balanced 50/50 by undersampling.
+
+| Pipeline | n_feat | test acc |
+|---|---:|---:|
+| naive (rot-inv) | 12 | **0.811 ± 0.023** |
+| steinhardt (rot-inv) | 6 | 0.794 ± 0.018 |
+| icosahedral Q_l (rot-inv) | 3 | 0.787 ± 0.017 |
+| cell600_ade_norms (rot-inv) | 9 | 0.648 ± 0.034 |
+| ssg_irrep A+T1+H (direction-aware) | 9 | 0.507 ± 0.034 |
+| steinhardt + icos | 9 | 0.793 ± 0.018 |
+
+Confirms the pattern from the other two tasks: the label is
+rotation-invariant (orbit size is an icosahedral-class function),
+so rotation-invariant features win. The SSG matrices' specific
+contribution is the *exact orbit-based labels* — the ML accuracy
+itself doesn't favor SSG-irrep features when the target doesn't
+transform.
+
+## Summary across three tasks
+
+| Task | Target symmetry | Best pipeline (acc / R²) |
+|---|---|---|
+| Vertex class (||perp||) | rotation-invariant | naive + steinhardt (0.677) |
+| Perp X regression | direction-equivariant | cell600_ade_coeffs (R² = +0.378) |
+| Stabilizer (binary) | rotation-invariant | naive (0.811) |
+
+The principle: features must match the target's symmetry group, no
+more, no less. The SSG decomposition matters STRUCTURALLY (it's the
+right framework to think in, and the right way to assign canonical
+labels like stabilizer class); direction-aware *irrep-coefficient*
+features pay off specifically when the target itself transforms
+under the group.

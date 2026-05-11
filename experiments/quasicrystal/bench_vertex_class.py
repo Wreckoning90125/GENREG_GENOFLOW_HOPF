@@ -46,6 +46,7 @@ from experiments.quasicrystal.features import (
     icosahedral_features,
     cell600_irrep_features,
     cell600_irrep_coeffs,
+    ssg_irrep_features,
 )
 
 
@@ -161,9 +162,14 @@ def main(out_path: str, cutoff: int = 5, n_classes: int = N_CLASSES,
     X_ade_coeffs = cell600_irrep_coeffs(qc, n_neighbors)
     t_ade_coeffs = time.time() - t
 
+    t = time.time()
+    X_ssg = ssg_irrep_features(qc, n_neighbors)
+    t_ssg = time.time() - t
+
     print(f"[bench-qc] feature times: naive={t_naive:.2f}s, "
           f"steinhardt={t_stein:.2f}s, icos={t_icos:.2f}s, "
-          f"ade={t_ade:.2f}s, ade_coeffs={t_ade_coeffs:.2f}s")
+          f"ade={t_ade:.2f}s, ade_coeffs={t_ade_coeffs:.2f}s, "
+          f"ssg={t_ssg:.2f}s")
 
     pipelines = [
         ("naive", X_naive),
@@ -171,9 +177,11 @@ def main(out_path: str, cutoff: int = 5, n_classes: int = N_CLASSES,
         ("icosahedral", X_icos),
         ("cell600_ade_norms", X_ade),
         ("cell600_ade_coeffs", X_ade_coeffs),
+        ("ssg_irrep (A+T1+H)", X_ssg),
         ("steinhardt+icosahedral", np.concatenate([X_stein, X_icos], axis=1)),
         ("naive+steinhardt", np.concatenate([X_naive, X_stein], axis=1)),
         ("naive+ade_coeffs", np.concatenate([X_naive, X_ade_coeffs], axis=1)),
+        ("naive+ssg", np.concatenate([X_naive, X_ssg], axis=1)),
     ]
 
     results = {}
@@ -229,6 +237,114 @@ def _ridge_regress(X_train, y_train, X_test, y_test, lam=1e-2):
     }
 
 
+def stabilizer_class_classification(out_path: str, cutoff: int = 5,
+                                     n_neighbors: int = 12,
+                                     seeds=(0, 1, 2, 3, 4)):
+    """Classify each QC vertex by its SSG orbit *size*.
+
+    Each vertex lies in an SSG-orbit (the icosahedral group I acting
+    on its Z⁶ coord); the orbit size ∈ {1, 12, 20, 30, 60}
+    corresponds to the stabilizer order |I|/|orbit| ∈ {60, 5, 3, 2,
+    1} — the local rotational symmetry of the vertex's neighborhood.
+    A 5-fold-axis vertex (size-12 orbit) has a locally C₅-symmetric
+    environment; a generic vertex has trivial stabilizer.
+
+    This is an SSG-canonical label, defined directly from the
+    superspace-group action. Rotation-invariant features detecting
+    local point-group order (Steinhardt, icosahedral Q_l) should
+    pick it up; direction-aware features should add nothing
+    (the label is itself rotation-invariant).
+    """
+    from experiments.quasicrystal.ssg_decomposition import ssg_rotation_matrices
+    print(f"[bench-qc-stab] generating QC at cutoff={cutoff}...")
+    qc = generate(cutoff=cutoff)
+    SSG = ssg_rotation_matrices()
+    N = len(qc.integer_coords)
+    ic = qc.integer_coords.astype(np.int64)
+
+    print(f"[bench-qc-stab] computing SSG orbits over {N} vertices…")
+    vert_index = {tuple(int(x) for x in v): i for i, v in enumerate(ic)}
+    orbit_size = np.zeros(N, dtype=np.int32)
+    visited = np.zeros(N, dtype=bool)
+    for start in range(N):
+        if visited[start]:
+            continue
+        orbit_vecs = set()
+        for M in SSG:
+            orbit_vecs.add(tuple(int(x) for x in M @ ic[start]))
+        members = [vert_index[v] for v in orbit_vecs if v in vert_index]
+        size = len(orbit_vecs)  # orbit size in Z^6 (not restricted to QC)
+        for m in members:
+            orbit_size[m] = size
+            visited[m] = True
+
+    # Binary label: 1 if vertex is on a high-symmetry axis (orbit size
+    # < 60, i.e., non-trivial stabilizer), 0 if generic (size = 60).
+    # 96.3% of vertices are generic, so we balance the classes by
+    # undersampling the generic class.
+    high_sym_mask = orbit_size < 60
+    high_sym_idx = np.where(high_sym_mask)[0]
+    generic_idx = np.where(~high_sym_mask)[0]
+    n_balance = min(len(high_sym_idx), len(generic_idx))
+
+    rng_bal = np.random.default_rng(42)
+    keep_generic = rng_bal.choice(generic_idx, size=n_balance, replace=False)
+    keep = np.concatenate([high_sym_idx, keep_generic])
+    y = np.zeros(len(keep), dtype=np.int32)
+    y[: len(high_sym_idx)] = 1  # high-symmetry = positive class
+    print(f"[bench-qc-stab] balanced dataset: "
+          f"{len(high_sym_idx)} high-symmetry vertices + "
+          f"{n_balance} downsampled generic vertices "
+          f"(total {len(keep)}, 50/50)")
+
+    # Compute all feature pipelines on the *full* QC, then index.
+    X_naive_full = nearest_distance_features(qc, n_neighbors)
+    X_stein_full = steinhardt_Q(qc, n_neighbors, ls=(2, 4, 6, 8, 10, 12))
+    X_icos_full = icosahedral_features(qc, n_neighbors)
+    X_ade_norms_full = cell600_irrep_features(qc, n_neighbors)
+    X_ssg_full = ssg_irrep_features(qc, n_neighbors)
+
+    pipelines = [
+        ("naive (rot-inv)", X_naive_full[keep]),
+        ("steinhardt (rot-inv)", X_stein_full[keep]),
+        ("icosahedral Q_l (rot-inv)", X_icos_full[keep]),
+        ("cell600_ade_norms (rot-inv)", X_ade_norms_full[keep]),
+        ("ssg_irrep A+T1+H (direction-aware)", X_ssg_full[keep]),
+        ("steinhardt+icos", np.concatenate([X_stein_full[keep], X_icos_full[keep]], axis=1)),
+    ]
+
+    results = {}
+    for name, X in pipelines:
+        runs = []
+        for s in seeds:
+            res = evaluate_pipeline(name, X, y, seed=s, n_classes=2)
+            runs.append(res)
+        accs = np.array([r["test_acc"] for r in runs])
+        results[name] = {
+            "n_features": int(X.shape[1]),
+            "test_acc_mean": float(accs.mean()),
+            "test_acc_std": float(accs.std(ddof=1)) if len(accs) > 1 else 0.0,
+            "test_acc_per_seed": accs.tolist(),
+        }
+        print(f"[bench-qc-stab] {name:42s} ({X.shape[1]:2d} feat): "
+              f"acc {accs.mean():.4f} ± {accs.std(ddof=1):.4f}")
+
+    out = {
+        "task": "stabilizer_class_classification_balanced_binary",
+        "n_total_vertices": int(N),
+        "n_high_symmetry": int(len(high_sym_idx)),
+        "n_balanced_dataset": int(len(keep)),
+        "n_neighbors": n_neighbors,
+        "cutoff": cutoff,
+        "label_meaning": "1 = on high-symmetry axis (stab > 1), 0 = generic",
+        "results": results,
+    }
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump(out, f, indent=2)
+    return out
+
+
 def perp_coordinate_regression(out_path: str, cutoff: int = 5,
                                 n_neighbors: int = 12,
                                 seeds=(0, 1, 2, 3, 4)):
@@ -254,13 +370,16 @@ def perp_coordinate_regression(out_path: str, cutoff: int = 5,
     X_stein = steinhardt_Q(qc, n_neighbors, ls=(2, 4, 6, 8, 10, 12))
     X_ade_norms = cell600_irrep_features(qc, n_neighbors)
     X_ade_coeffs = cell600_irrep_coeffs(qc, n_neighbors)
+    X_ssg = ssg_irrep_features(qc, n_neighbors)
 
     pipelines = [
         ("naive (rot-inv)", X_naive),
         ("steinhardt (rot-inv)", X_stein),
         ("cell600_ade_norms (rot-inv)", X_ade_norms),
         ("cell600_ade_coeffs (direction-aware)", X_ade_coeffs),
+        ("ssg_irrep A+T1+H (direction-aware)", X_ssg),
         ("naive + ade_coeffs", np.concatenate([X_naive, X_ade_coeffs], axis=1)),
+        ("naive + ssg", np.concatenate([X_naive, X_ssg], axis=1)),
     ]
 
     results = {}
@@ -303,3 +422,6 @@ if __name__ == "__main__":
     print()
     out_reg = Path("experiments/quasicrystal/checkpoints/perp_regression_bench.json")
     perp_coordinate_regression(str(out_reg))
+    print()
+    out_stab = Path("experiments/quasicrystal/checkpoints/stabilizer_bench.json")
+    stabilizer_class_classification(str(out_stab))
