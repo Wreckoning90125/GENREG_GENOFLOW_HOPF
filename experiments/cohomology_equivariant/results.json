@@ -1,0 +1,185 @@
+{
+  "D_4": {
+    "group": "D_4 (order 8)",
+    "N": 1,
+    "clifford_level_n": 3,
+    "obstruction_geometry": {
+      "hypothesis_dim": 8,
+      "shared_dimensions": 1,
+      "mean_cos2_principal_angles": 0.3671874999999999,
+      "interpretation": "naive & cocycle-aware layers (both 8 params) share only 1 direction(s)"
+    },
+    "experiment_A_nontrivial_target": {
+      "target_class": "alpha_N (non-trivial, H^2=Z_2)",
+      "naive_train_rel_err": 0.7328030030856545,
+      "naive_test_rel_err": 0.735371033819099,
+      "aware_train_rel_err": 2.953565323347546e-15,
+      "aware_test_rel_err": 3.0330343276387613e-15,
+      "naive_theoretical_floor": 0.893264616864748,
+      "improvement_factor": 735371033819.099
+    },
+    "experiment_B_control_trivial_target": {
+      "target_class": "trivial (alpha == 1)",
+      "naive_test_rel_err": 6.449250437708832e-16,
+      "aware_test_rel_err": 0.527258319606357,
+      "note": "roles flip vs Experiment A: proves the effect is the cohomology class, not model capacity"
+    },
+    "experiment_C_beta_recovery_on_subgroup": {
+      "subgroup": "K = <r> = Z_4",
+      "ordinary_Kconv_fit_rel_resid": 0.7377625048307282,
+      "beta_gauge_identity_max_err": 3.1401849173675503e-16,
+      "after_beta_gauge_fit_rel_resid": 6.195573973160723e-16,
+      "interpretation": "beta_N trivializes alpha_N on <r>: the twisted target becomes ordinary-equivariant after the diagonal beta-gauge, so residual collapses to ~0"
+    },
+    "training_curves": {
+      "naive": [
+        1.0,
+        0.7657148614080839,
+        0.7466100116750832,
+        0.739192338498492,
+        0.7357926529236429,
+        0.7342025392454525,
+        0.7334579217489401,
+        0.7331093999477147,
+        0.7329463299764067,
+        0.7328700448602808,
+        0.7328349626797753
+      ],
+      "aware": [
+        1.0,
+        0.00639675917264406,
+        0.00012317669466251622,
+        2.3721111870786294e-06,
+        4.568162490529512e-08,
+        8.797272354824387e-10,
+        1.6941597549599478e-11,
+        3.2625082073447133e-13,
+        6.2787294803719324e-15,
+        3.1115498601868925e-16,
+        3.092142747330729e-16
+      ]
+    }
+  },
+  "D_8": {
+    "group": "D_8 (order 16)",
+    "N": 2,
+    "clifford_level_n": 4,
+    "obstruction_geometry": {
+      "hypothesis_dim": 16,
+      "shared_dimensions": 1,
+      "mean_cos2_principal_angles": 0.3427734375000004,
+      "interpretation": "naive & cocycle-aware layers (both 16 params) share only 1 direction(s)"
+    },
+    "experiment_A_nontrivial_target": {
+      "target_class": "alpha_N (non-trivial, H^2=Z_2)",
+      "naive_train_rel_err": 0.6308066105488419,
+      "naive_test_rel_err": 0.6429047387262535,
+      "aware_train_rel_err": 1.3228635585752923e-15,
+      "aware_test_rel_err": 1.3360031549630981e-15,
+      "naive_theoretical_floor": 0.7708988518312071,
+      "improvement_factor": 642904738726.2535
+    },
+    "experiment_B_control_trivial_target": {
+      "target_class": "trivial (alpha == 1)",
+      "naive_test_rel_err": 1.4057871741440096e-15,
+      "aware_test_rel_err": 0.7348685918352167,
+      "note": "roles flip vs Experiment A: proves the effect is the cohomology class, not model capacity"
+    },
+    "experiment_C_beta_recovery_on_subgroup": {
+      "subgroup": "K = <r> = Z_8",
+      "ordinary_Kconv_fit_rel_resid": 0.7948641283821869,
+      "beta_gauge_identity_max_err": 1.1801832636420706e-15,
+      "after_beta_gauge_fit_rel_resid": 2.088849326111752e-15,
+      "interpretation": "beta_N trivializes alpha_N on <r>: the twisted target becomes ordinary-equivariant after the diagonal beta-gauge, so residual collapses to ~0"
+    },
+    "training_curves": {
+      "naive": [
+        1.0,
+        0.6365828279625267,
+        0.6333291703467339,
+        0.6323198181337398,
+        0.6317787305737165,
+        0.6314454716548517,
+        0.6312315488077216,
+        0.6310913634661461,
+        0.6309983180990058,
+        0.6309360550435285,
+        0.6308950325178814
+      ],
+      "aware": [
+        1.0,
+        0.02680213006830439,
+        0.011861298465422434,
+        0.005387555538684721,
+        0.0024597304095865555,
+        0.001124174031231854,
+        0.0005138893172722987,
+        0.00023492194791889924,
+        0.00010739428742517166,
+        4.909525083734708e-05,
+        2.2887400368332813e-05
+      ]
+    }
+  },
+  "D_16": {
+    "group": "D_16 (order 32)",
+    "N": 4,
+    "clifford_level_n": 5,
+    "obstruction_geometry": {
+      "hypothesis_dim": 32,
+      "shared_dimensions": 1,
+      "mean_cos2_principal_angles": 0.3358154296875002,
+      "interpretation": "naive & cocycle-aware layers (both 32 params) share only 1 direction(s)"
+    },
+    "experiment_A_nontrivial_target": {
+      "target_class": "alpha_N (non-trivial, H^2=Z_2)",
+      "naive_train_rel_err": 0.8415940410724867,
+      "naive_test_rel_err": 0.843071996985303,
+      "aware_train_rel_err": 1.425622872044309e-15,
+      "aware_test_rel_err": 1.460102009250578e-15,
+      "naive_theoretical_floor": 0.7654840548102915,
+      "improvement_factor": 843071996985.303
+    },
+    "experiment_B_control_trivial_target": {
+      "target_class": "trivial (alpha == 1)",
+      "naive_test_rel_err": 2.8719449540621735e-15,
+      "aware_test_rel_err": 0.8042153981099015,
+      "note": "roles flip vs Experiment A: proves the effect is the cohomology class, not model capacity"
+    },
+    "experiment_C_beta_recovery_on_subgroup": {
+      "subgroup": "K = <r> = Z_16",
+      "ordinary_Kconv_fit_rel_resid": 0.8785101375946958,
+      "beta_gauge_identity_max_err": 1.2139693544093743e-15,
+      "after_beta_gauge_fit_rel_resid": 3.4929220542132726e-15,
+      "interpretation": "beta_N trivializes alpha_N on <r>: the twisted target becomes ordinary-equivariant after the diagonal beta-gauge, so residual collapses to ~0"
+    },
+    "training_curves": {
+      "naive": [
+        1.0,
+        0.8460102019152275,
+        0.8429138533064087,
+        0.8421603326871084,
+        0.8418889724704046,
+        0.8417706719730826,
+        0.8417118532419963,
+        0.8416792978428125,
+        0.8416595171327007,
+        0.8416464749533052,
+        0.8416374511882843
+      ],
+      "aware": [
+        1.0,
+        0.07263400953551784,
+        0.0233762435845894,
+        0.008891858435721068,
+        0.0036732011838131362,
+        0.0015813314717608323,
+        0.0006957868913546317,
+        0.00030976705868234736,
+        0.00013878249994264043,
+        6.238747960471252e-05,
+        2.8661509498172095e-05
+      ]
+    }
+  }
+}
