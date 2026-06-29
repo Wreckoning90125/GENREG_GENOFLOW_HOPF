@@ -295,6 +295,30 @@ def test_morph_forces_topology_change():
     assert len(res["critical_slice_indices"]) >= 1
 
 
+# ---- non-symmorphic forced band degeneracy + ML ----------------
+def test_cocycle_forces_band_degeneracy():
+    from nonsymmorphic_degeneracy import forced_degeneracy_demo
+    deg = forced_degeneracy_demo(N=1, trials=100)
+    # projective (nontrivial-cocycle) symmetry forces ALL bands paired
+    assert deg["projective_all_bands_paired"]
+    assert deg["projective_symmetric_patterns"] == [[2, 2, 2, 2]]
+    # linear (trivial) symmetry leaves unpaired bands
+    assert deg["linear_has_unpaired_bands"]
+    assert deg["linear_symmetric_patterns"] == [[1, 1, 1, 1, 2, 2]]
+
+
+def test_cocycle_prior_protects_degeneracy_in_ML():
+    from nonsymmorphic_degeneracy import band_prediction_benchmark
+    b = band_prediction_benchmark(N=1, n_train=800, n_test=400)
+    # cocycle prior respects the protected degeneracy EXACTLY, in- and OOD
+    assert b["cocycle_prior"]["pairing_error_indist"] < 1e-6
+    assert b["cocycle_prior"]["pairing_error_OOD"] < 1e-6
+    # the regular regressor violates it, and worse out of distribution
+    assert b["plain_regressor"]["pairing_error_indist"] > 1e-3
+    assert (b["plain_regressor"]["pairing_error_OOD"]
+            > b["plain_regressor"]["pairing_error_indist"])
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-q"]))
