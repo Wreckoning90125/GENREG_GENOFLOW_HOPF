@@ -43,18 +43,27 @@ class CocycleRepresentation:
     model capacity.
     """
 
-    def __init__(self, N: int, cocycle: bool = True):
+    def __init__(self, N: int, cocycle: bool = True, use_raw: bool = False):
+        """use_raw=True selects the {+-1}-valued raw representative
+        alpha'_N (Eq. A.23) instead of the BSW-normalized alpha_N.
+        alpha'_N is cohomologous to alpha_N (same non-trivial Z_2 class)
+        but real-valued, which keeps the ML convolution layers real.
+        The normalization only mattered for the QEC lattice vertex
+        operators, not for the equivariance/obstruction structure."""
         self.N = N
         self.G = Dihedral(N)
         self.dim = self.G.order
         self.els = self.G.elements()
         self.idx = {g: i for i, g in enumerate(self.els)}
+        self.use_raw = use_raw
         self.coc = DihedralCocycle(N) if cocycle else None
 
     # ---- phase lookups -----------------------------------------
     def _alpha(self, g, h) -> complex:
         if self.coc is None:
             return 1.0 + 0.0j
+        if self.use_raw:
+            return self.coc.ph.to_complex(self.coc.alpha_raw_exp(g, h))
         return self.coc.alpha(g, h)
 
     # ---- left regular representations ---------------------------

@@ -240,6 +240,61 @@ def test_qubit_realization_sec_iv():
         assert v < 1e-10, k
 
 
+# ---- crystallographic non-symmorphic -> projective bridge -------
+def test_symmorphic_is_trivial():
+    import crystallographic_cohomology as cc
+    r = cc.symmorphic_D4_sanity()
+    assert r["is_valid_cocycle"] and r["cohomologically_trivial"]
+
+
+def test_pure_screw_cyclic_is_trivial_in_U1():
+    # cyclic C_4 has H^2(C_4, U(1)) = 0: a pure screw cannot be nontrivial
+    import crystallographic_cohomology as cc
+    r = cc.cyclic_screw_sanity()
+    assert r["is_valid_cocycle"] and r["cohomologically_trivial"]
+
+
+def test_gyroid_screw_nontrivial_diamond_trivial():
+    import crystallographic_cohomology as cc
+    for screw in ("4_1", "4_3"):
+        r = cc.D4_screw_case(screw)
+        assert r["is_valid_cocycle"]
+        assert r["nontrivial_class_in_Z2"], f"{screw} should be nontrivial"
+    rd = cc.D4_screw_case("2_1")
+    assert rd["is_valid_cocycle"]
+    assert not rd["nontrivial_class_in_Z2"], "2_1 should be trivial at this k"
+
+
+def test_gyroid_screw_is_warman_class():
+    import crystallographic_cohomology as cc
+    c = cc.connect_to_warman()
+    assert c["same_class_by_uniqueness_of_Z2"]
+
+
+# ---- gyroid <-> diamond morph (Morse / graph rewrite) ----------
+def test_cubical_euler_torus_and_empty():
+    import numpy as np
+    from gyroid_diamond_morph import cubical_euler_periodic
+    n = 8
+    assert cubical_euler_periodic(np.zeros((n, n, n), bool)) == 0   # empty
+    assert cubical_euler_periodic(np.ones((n, n, n), bool)) == 0    # 3-torus
+
+
+def test_morph_crystallography_matches_paper():
+    from gyroid_diamond_morph import crystallography
+    cr = crystallography()
+    assert cr["matches_reported_35p27"]
+    assert abs(cr["angle([111],[110])_deg"] - cr["arccos(2/sqrt6)_deg"]) < 1e-6
+
+
+def test_morph_forces_topology_change():
+    from gyroid_diamond_morph import classify_path
+    res = classify_path(n_steps=9, n=24)
+    # gyroid and diamond differ in Euler characteristic -> graph rewrite forced
+    assert res["chi_changes"]
+    assert len(res["critical_slice_indices"]) >= 1
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-q"]))

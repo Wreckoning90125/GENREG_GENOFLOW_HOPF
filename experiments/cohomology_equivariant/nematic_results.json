@@ -1,0 +1,38 @@
+{
+  "charge_invariance": {
+    "reflect(+1/2)_dist_to_+1/2": 1.2901,
+    "reflect(+1/2)_dist_to_-1/2": 0.6451,
+    "reflection_flips_sign": true,
+    "conclusion": "charge is D_4-invariant (reflection does NOT flip the sign) -> no cohomological obstruction for this task"
+  },
+  "runs": {
+    "120": {
+      "plain": {
+        "test_acc": 0.8895833333333333,
+        "half_pair_acc": 0.7791666666666667
+      },
+      "linear": {
+        "test_acc": 0.99375,
+        "half_pair_acc": 1.0
+      },
+      "cocycle": {
+        "test_acc": 0.8145833333333333,
+        "half_pair_acc": 1.0
+      }
+    },
+    "600": {
+      "plain": {
+        "test_acc": 1.0,
+        "half_pair_acc": 1.0
+      },
+      "linear": {
+        "test_acc": 0.99375,
+        "half_pair_acc": 1.0
+      },
+      "cocycle": {
+        "test_acc": 0.99375,
+        "half_pair_acc": 1.0
+      }
+    }
+  }
+}
