@@ -1,0 +1,46 @@
+{
+  "forced_degeneracy": {
+    "group": "D_4",
+    "linear_symmetric_patterns": [
+      [
+        1,
+        1,
+        1,
+        1,
+        2,
+        2
+      ]
+    ],
+    "projective_symmetric_patterns": [
+      [
+        2,
+        2,
+        2,
+        2
+      ]
+    ],
+    "projective_all_bands_paired": true,
+    "linear_has_unpaired_bands": true
+  },
+  "benchmark": {
+    "plain_regressor": {
+      "spectrum_rmse_indist": 0.030178826302289963,
+      "spectrum_rmse_OOD": 0.09180808812379837,
+      "pairing_error_indist": 0.030596230179071426,
+      "pairing_error_OOD": 0.0975806936621666
+    },
+    "linear_class_prior": {
+      "spectrum_rmse_indist": 0.024097925052046776,
+      "spectrum_rmse_OOD": 0.0730074942111969,
+      "pairing_error_indist": 0.016373885795474052,
+      "pairing_error_OOD": 0.052398938685655594
+    },
+    "cocycle_prior": {
+      "spectrum_rmse_indist": 0.03419869765639305,
+      "spectrum_rmse_OOD": 0.10631047189235687,
+      "pairing_error_indist": 0.0,
+      "pairing_error_OOD": 0.0
+    },
+    "_true_pairing_error": 0.0
+  }
+}
