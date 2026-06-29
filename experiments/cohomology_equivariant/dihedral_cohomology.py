@@ -193,6 +193,15 @@ class DihedralCocycle:
     def alpha(self, g, h) -> complex:
         return self.ph.to_complex(self.alpha_exp(g, h))
 
+    # ---- raw trivialization beta'_N on <r> (Eq. A.25) ----------
+    def beta_raw_rot_exp(self, a: int) -> int:
+        """beta'_N(r^a) = exp(i pi a/(4N))  ->  exponent a (Eq. A.25).
+
+        This trivializes the *un-normalized* cocycle alpha'_N on <r>
+        (before the kappa_N renormalization), i.e. alpha'_N|<r> = delta beta'.
+        """
+        return a % (8 * self.N)
+
     # ---- trivialization beta_N on <r> (Eq. A.29) ---------------
     def beta_rot_exp(self, a: int) -> int:
         """beta_N(r^a) as a phase exponent (a in 0..4N-1).
@@ -297,6 +306,67 @@ def check_beta_trivializes(coc: DihedralCocycle, subgroup="r") -> bool:
             if db != coc.alpha_exp(g, h):
                 return False
     return True
+
+
+def check_raw_formulas(coc: DihedralCocycle) -> dict:
+    """Independent checks against the paper's *explicit* closed forms
+    for the un-normalized cocycle (App. A.3), not just self-consistency:
+
+      * alpha'_N(r^{2N}, r^{2N}) = -1                       (Eq. A.24)
+      * alpha'_N|<r> = delta beta'_N, beta'_N(r^a)=e^{i pi a/4N} (A.25)
+      * beta_N(r) = e^{i pi/(4N)},  beta_N(r^{2N}) = +1        (A.29)
+    """
+    G, ph = coc.G, coc.ph
+    M = 8 * coc.N
+    out = {}
+    # A.24
+    out["alpha'(r^2N,r^2N) == -1"] = (
+        coc.alpha_raw_exp(G.rot(2 * coc.N), G.rot(2 * coc.N)) == 4 * coc.N
+    )
+    # A.25: raw cocycle trivialized by beta' on <r>
+    ok = True
+    for a in range(G.n_rot):
+        for b in range(G.n_rot):
+            ga, gb = G.rot(a), G.rot(b)
+            gab = G.mul(ga, gb)
+            db = (coc.beta_raw_rot_exp(a) + coc.beta_raw_rot_exp(b)
+                  - coc.beta_raw_rot_exp(gab[0])) % M
+            if db != coc.alpha_raw_exp(ga, gb):
+                ok = False
+                break
+        if not ok:
+            break
+    out["alpha'|<r> == delta beta'  (A.25)"] = ok
+    # A.29 specific values
+    out["beta_N(r) == e^{i pi/(4N)}"] = (
+        abs(ph.to_complex(coc.beta_rot_exp(1))
+            - cmath.exp(1j * math.pi / (4 * coc.N))) < 1e-12
+    )
+    out["beta_N(r^{2N}) == +1"] = ph.is_one(coc.beta_rot_exp(2 * coc.N))
+    return out
+
+
+def check_class_order_two(coc: DihedralCocycle) -> bool:
+    """H^2(D_{4N},U(1)) = Z_2: the class of alpha_N has order exactly 2.
+
+    We use the cohomologous *raw* representative alpha'_N (=alpha_N up
+    to the coboundary delta kappa), which is genuinely {+-1}-valued and
+    hence 2-torsion as a cocycle: alpha'_N^2 is identically trivial, so
+    2*[alpha_N] = 0.  Combined with [alpha_N] != 0 (alpha_N not a
+    coboundary), the class order is exactly 2.
+
+    (The normalized alpha_N itself takes values in {+-1, +-i} because of
+    the kappa renormalization, so alpha_N^2 is only a coboundary, not the
+    identity cocycle -- which is why the raw representative is the clean
+    witness for 2-torsion.)
+    """
+    M = 8 * coc.N
+    squared_trivial = all(
+        (2 * coc.alpha_raw_exp(g, h)) % M == 0
+        for g in coc.G.elements()
+        for h in coc.G.elements()
+    )
+    return squared_trivial and not is_coboundary(coc)
 
 
 def is_coboundary(coc: DihedralCocycle) -> bool:
@@ -433,7 +503,7 @@ def reproduce_gate_table(N: int):
 
 if __name__ == "__main__":
     print("Dihedral 2-cocycle verification  (Warman-Schafer-Nameki 2512.13777)\n")
-    for N in (1, 2, 4, 8):
+    for N in (1, 2, 4, 8, 16):
         coc = DihedralCocycle(N)
         tab = reproduce_gate_table(N)
         print(f"D_{4*N}  (order {8*N}, N={N}):")
@@ -441,7 +511,9 @@ if __name__ == "__main__":
         print(f"  cocycle condition (alpha_N)  : {check_cocycle_condition(coc,'alpha')}")
         print(f"  normalization (Eq. A.18)     : {check_normalization(coc)}")
         print(f"  beta trivializes on <r>      : {check_beta_trivializes(coc,'r')}")
-        print(f"  alpha_N non-trivial (Z_2)    : {not is_coboundary(coc)}")
+        raw = check_raw_formulas(coc)
+        print(f"  raw closed-forms A.24/A.25/A.29: {all(raw.values())}  {raw}")
+        print(f"  class order exactly 2 (Z_2)  : {check_class_order_two(coc)}")
         print(f"  gate U(rs,s) = {tab['phase1']:.6f}  -> {tab['gate']}")
         print(f"  matches paper Table I        : {tab['matches']}   "
               f"(Clifford level n={tab['clifford_level_n']})\n")

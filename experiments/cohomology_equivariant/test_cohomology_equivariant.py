@@ -24,8 +24,10 @@ from dihedral_cohomology import (
     Dihedral,
     DihedralCocycle,
     check_beta_trivializes,
+    check_class_order_two,
     check_cocycle_condition,
     check_normalization,
+    check_raw_formulas,
     is_coboundary,
     reproduce_gate_table,
 )
@@ -36,6 +38,7 @@ from projective_equivariant import (
 )
 
 NS = [1, 2, 4]
+NS_BIG = [1, 2, 4, 8, 16]  # n = 3..7 in the Clifford hierarchy
 
 
 # ---- group axioms ----------------------------------------------
@@ -72,6 +75,19 @@ def test_normalization(N):
 def test_alpha_is_nontrivial_class(N):
     # alpha_N must NOT be a coboundary (it is the generator of Z_2)
     assert not is_coboundary(DihedralCocycle(N))
+
+
+@pytest.mark.parametrize("N", NS_BIG)
+def test_class_order_exactly_two(N):
+    # H^2(D_4N, U(1)) = Z_2: the class has order exactly 2
+    assert check_class_order_two(DihedralCocycle(N))
+
+
+@pytest.mark.parametrize("N", NS_BIG)
+def test_raw_closed_forms(N):
+    # independent term-by-term match to paper Eqs. A.24, A.25, A.29
+    res = check_raw_formulas(DihedralCocycle(N))
+    assert all(res.values()), res
 
 
 # ---- trivialization beta_N -------------------------------------
@@ -202,6 +218,26 @@ def test_beta_gauge_identity(N):
         lhs = Dbeta @ La_K @ Dinv
         bk = coc.ph.to_complex(coc.beta_exp(k))
         assert np.max(np.abs(lhs - bk * L_K)) < 1e-10
+
+
+# ---- qubit realization (paper Sec. IV) -------------------------
+def test_qubit_realization_sec_iv():
+    import qubit_realization as qr
+    # Z_4 operators as 2-qubit Cliffords (IV.11-15) -- exact
+    for k, v in qr.verify_z4_operators().items():
+        assert v < 1e-12, k
+    # D_4 group relations on 3 qubits (IV.16)
+    for k, v in qr.verify_group_relations().items():
+        assert v < 1e-10, k
+    # reproduces the abstract regular rep of D_4
+    for k, v in qr.verify_matches_abstract_regular_rep().items():
+        assert v < 1e-10, k
+    # irrep operators diagonal with correct characters (III.2/IV.17)
+    for k, v in qr.verify_irrep_operators().items():
+        assert v < 1e-10, k
+    # boundary cochain gate M^beta == (CS^dag)(I (x) T) (x) I (III.19)
+    for k, v in qr.verify_M_beta().items():
+        assert v < 1e-10, k
 
 
 if __name__ == "__main__":
